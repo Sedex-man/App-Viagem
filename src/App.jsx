@@ -244,25 +244,8 @@ function ProductImage({ produto, style={}, iconSize=44 }) {
       />
     </div>
   );
-}) {
-  const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)]||null);
-  const [loading, setLoading] = useState(imageCache[String(produto.id)]===undefined && !produto.imagem);
-  const [err, setErr] = useState(false);
-  useEffect(() => {
-    const key = String(produto.id);
-    if (imageCache[key] !== undefined) { setImgUrl(imageCache[key]); setLoading(false); return; }
-    if (produto.imagem) { setImgUrl(produto.imagem); setLoading(false); return; }
-    setLoading(true); setErr(false);
-    getProductImage(produto).then(url => { setImgUrl(url); setLoading(false); });
-  }, [produto.id, produto.link, produto.imagem]);
-  if (!imgUrl || err) return (
-    <div style={{width:"100%",height:"100%",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",background:`linear-gradient(135deg,${C.primaryLight},${C.purpleLight})`,...style}}>
-      {loading ? <div className="spinner"/> : <span style={{fontSize:iconSize}}>{LOJA_EMOJI[produto.loja]||"🛍"}</span>}
-      {loading && <div style={{fontSize:10,color:C.textLight,marginTop:4}}>Buscando...</div>}
-    </div>
-  );
-  return <div style={{width:"100%",height:"100%",...style}}><img src={imgUrl} alt={produto.nome} style={{width:"100%",height:"100%",objectFit:"cover"}} onError={()=>setErr(true)}/></div>;
 }
+
 
 // ─── XLSX PARSER ─────────────────────────────────────────────────────────────
 function parseSheet(wb, sheetName) {
