@@ -1,25 +1,41 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 
 
-// ─── LOCALSTORAGE PERSISTENCE ────────────────────────────────────────────────
-const STORAGE_KEY = 'travelshop_v1';
+// ─── FIREBASE / FIRESTORE PERSISTENCE ────────────────────────────────────────
+// Configure estas variáveis no Vercel em Project Settings > Environment Variables.
+// Em projeto Vite, elas precisam começar com VITE_ para ficarem disponíveis no app.
+const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+};
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
-}
+const firebaseApp = initializeApp(firebaseConfig);
+const db = getFirestore(firebaseApp);
 
-function saveState(state) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn('localStorage full:', e);
-  }
+// Documento único da viagem. Todos os dispositivos conectados ao mesmo projeto
+// Firebase leem e gravam aqui, então PC e celular enxergam os mesmos dados.
+const TRAVEL_DOC_REF = doc(db, "travelshop", "orlando-2027");
+
+const normalizeCloudState = data => ({
+  settings: data?.settings || INITIAL_SETTINGS,
+  produtos: Array.isArray(data?.produtos) ? data.produtos : SAMPLE_PRODUTOS,
+  itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
+  gastos: Array.isArray(data?.gastos) ? data.gastos : [],
+});
+
+async function saveCloudState(state) {
+  await setDoc(TRAVEL_DOC_REF, {
+    ...state,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 }
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
@@ -165,12 +181,11 @@ const SAMPLE_PRODUTOS = [
   {id:3,nome:"Keychron K2",loja:"Amazon",usd:119,peso:870,tipo:"solido",volume:0,status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:null},
 ];
 
-// Load persisted state or use defaults
-const _saved = loadState();
-const _initSettings = _saved?.settings || INITIAL_SETTINGS;
-const _initProdutos = _saved?.produtos || SAMPLE_PRODUTOS;
-const _initItensLegais = _saved?.itensLegais || [];
-const _initGastos = _saved?.gastos || [];
+// Estado inicial temporário até o primeiro snapshot do Firestore chegar.
+const _initSettings = INITIAL_SETTINGS;
+const _initProdutos = SAMPLE_PRODUTOS;
+const _initItensLegais = [];
+const _initGastos = [];
 
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
@@ -187,11 +202,58 @@ export default function App() {
   const [editGasto, setEditGasto] = useState(null);
   const [notification, setNotification] = useState(null);
   const [cotacaoLoading, setCotacaoLoading] = useState(false);
+  const [cloudReady, setCloudReady] = useState(false);
+  const skipNextCloudSave = useRef(false);
 
-  // Auto-save to localStorage whenever data changes
+  // Escuta em tempo real: qualquer alteração feita no PC aparece no celular e vice-versa.
   useEffect(() => {
-    saveState({ settings, produtos, itensLegais, gastos });
-  }, [settings, produtos, itensLegais, gastos]);
+    const unsubscribe = onSnapshot(TRAVEL_DOC_REF, async (snap) => {
+      if (!snap.exists()) {
+        skipNextCloudSave.current = true;
+        await saveCloudState({
+          settings: INITIAL_SETTINGS,
+          produtos: SAMPLE_PRODUTOS,
+          itensLegais: [],
+          gastos: [],
+        });
+        setCloudReady(true);
+        return;
+      }
+
+      const cloudState = normalizeCloudState(snap.data());
+      skipNextCloudSave.current = true;
+      setSettings(cloudState.settings);
+      setProdutos(cloudState.produtos);
+      setItensLegais(cloudState.itensLegais);
+      setGastos(cloudState.gastos);
+      setCloudReady(true);
+    }, (error) => {
+      console.error("Erro ao sincronizar com Firestore:", error);
+      notify("Erro ao sincronizar com a nuvem", "error");
+      setCloudReady(true);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Salva alterações locais direto no Firestore. Não usa mais localStorage.
+  useEffect(() => {
+    if (!cloudReady) return;
+    if (skipNextCloudSave.current) {
+      skipNextCloudSave.current = false;
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      saveCloudState({ settings, produtos, itensLegais, gastos })
+        .catch((error) => {
+          console.error("Erro ao salvar no Firestore:", error);
+          notify("Erro ao salvar na nuvem", "error");
+        });
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [settings, produtos, itensLegais, gastos, cloudReady]);
 
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
 
