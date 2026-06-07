@@ -1,9 +1,12 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
+<<<<<<< HEAD
 import { getProductImage, imageCache } from './imageService';
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+=======
+>>>>>>> a372dacb15e30273f08668b85c967f2a30434c38
 
 
 // ─── FIREBASE AUTH / FIRESTORE PERSISTENCE ────────────────────────────────
@@ -72,78 +75,184 @@ async function fetchCotacao() {
   return null;
 }
 
+// ─── IMAGE SCRAPER ────────────────────────────────────────────────────────────
+const imageCache = {};
+
+function normalizeUrl(url, baseUrl) {
+  if (!url) return null;
+  try {
+    return new URL(url, baseUrl).href;
+  } catch {
+    return url;
+  }
+}
+
+async function fetchOgImage(url) {
+  if (!url) return null;
+
+  try {
+    const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+    const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
+    const html = await res.text();
+
+    const patterns = [
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+property=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+      /<img[^>]+src=["']([^"']+)["'][^>]*>/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match?.[1]) return normalizeUrl(match[1], url);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchDDGImage(query) {
+  if (!query) return null;
+
+  try {
+    const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
+    const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(searchUrl)}`;
+    const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
+    const html = await res.text();
+
+    const vqd = html.match(/vqd=["']?([\d-]+)["']?/)?.[1];
+    if (!vqd) return null;
+
+    const apiUrl = `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${vqd}&p=1&o=json`;
+    const apiProxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
+    const apiRes = await fetch(apiProxy, { signal: AbortSignal.timeout(10000) });
+    const data = await apiRes.json();
+
+    const results = data?.results || [];
+    const best =
+      results.find(r => r.image && r.width > 250 && r.height > 250) ||
+      results[0];
+
+    return best?.image || null;
+  } catch {
+    return null;
+  }
+}
+
+async function getProductImage(p) {
+  const key = String(p.id);
+
+  // Se já tem imagem preenchida manualmente, NÃO substitui
+  if (p.imagem?.trim()) {
+    imageCache[key] = p.imagem.trim();
+    return p.imagem.trim();
+  }
+
+  if (imageCache[key] !== undefined) return imageCache[key];
+
+  // Primeiro tenta buscar pelo link do anúncio
+  const byLink = p.link?.trim() ? await fetchOgImage(p.link.trim()) : null;
+  if (byLink) {
+    imageCache[key] = byLink;
+    return byLink;
+  }
+
+  // Se não achar pelo link, busca na internet pelo nome
+  const query = [p.nome, p.loja, "product"].filter(Boolean).join(" ");
+  const byName = await fetchDDGImage(query);
+
+  imageCache[key] = byName || null;
+  return imageCache[key];
+}
+
 const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
 
 function ProductImage({ produto, style={}, iconSize=44 }) {
   const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)] || null);
-  const [loading, setLoading] = useState(!imgUrl);
+  const [loading, setLoading] = useState(
+    imageCache[String(produto.id)] === undefined && !produto.imagem
+  );
   const [err, setErr] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     const key = String(produto.id);
 
-    if (imageCache[key]) {
+    setErr(false);
+
+    // Se a imagem foi preenchida manualmente, usa ela e não busca outra
+    if (produto.imagem?.trim()) {
+      imageCache[key] = produto.imagem.trim();
+      setImgUrl(produto.imagem.trim());
+      setLoading(false);
+      return;
+    }
+
+    // Se já buscou antes, reutiliza o cache
+    if (imageCache[key] !== undefined) {
       setImgUrl(imageCache[key]);
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    setErr(false);
 
     getProductImage(produto).then(url => {
       if (cancelled) return;
-      if (url) {
-        setImgUrl(url);
-      } else {
-        setErr(true);
-      }
-      setLoading(false);
-    }).catch(() => {
-      if (cancelled) return;
-      setErr(true);
+      setImgUrl(url);
       setLoading(false);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [produto.id, produto.link, produto.imagem]);
+  }, [produto.id, produto.link, produto.imagem, produto.nome, produto.loja]);
 
   if (!imgUrl || err) {
     return (
       <div style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: `linear-gradient(135deg, ${C.primaryLight}, ${C.purpleLight})`,
+        width:"100%",
+        height:"100%",
+        display:"flex",
+        flexDirection:"column",
+        alignItems:"center",
+        justifyContent:"center",
+        background:`linear-gradient(135deg,${C.primaryLight},${C.purpleLight})`,
         ...style
       }}>
         {loading ? (
-          <div className="spinner" />
+          <div className="spinner"/>
         ) : (
-          <span style={{ fontSize: iconSize }}>
+          <span style={{fontSize:iconSize}}>
             {LOJA_EMOJI[produto.loja] || "🛍"}
           </span>
+        )}
+
+        {loading && (
+          <div style={{fontSize:10,color:C.textLight,marginTop:4}}>
+            Buscando...
+          </div>
         )}
       </div>
     );
   }
 
   return (
-    <div style={{ width: "100%", height: "100%", ...style }}>
+    <div style={{width:"100%",height:"100%",...style}}>
       <img
         src={imgUrl}
         alt={produto.nome}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        style={{width:"100%",height:"100%",objectFit:"cover"}}
         onError={() => setErr(true)}
       />
     </div>
   );
 }
+
 
 // ─── XLSX PARSER ─────────────────────────────────────────────────────────────
 function parseSheet(wb, sheetName) {
