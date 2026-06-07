@@ -1,28 +1,25 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
-import { db } from "./firebase";
-import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 
 
-// ─── FIREBASE AUTH / FIRESTORE PERSISTENCE ────────────────────────────────
-// Cada usuário logado tem sua própria "caixinha" no Firestore.
-// Os dados ficam em: usuarios_pwa/{uid}
-const auth = getAuth();
+// ─── LOCALSTORAGE PERSISTENCE ────────────────────────────────────────────────
+const STORAGE_KEY = 'travelshop_v1';
 
-const normalizeCloudState = data => ({
-  settings: data?.settings || INITIAL_SETTINGS,
-  produtos: Array.isArray(data?.produtos) ? data.produtos : SAMPLE_PRODUTOS,
-  itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
-  gastos: Array.isArray(data?.gastos) ? data.gastos : [],
-});
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch { return null; }
+}
 
-async function saveCloudState(userDocRef, state) {
-  await setDoc(userDocRef, {
-    ...state,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+function saveState(state) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  } catch (e) {
+    console.warn('localStorage full:', e);
+  }
 }
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
@@ -168,84 +165,13 @@ const SAMPLE_PRODUTOS = [
   {id:3,nome:"Keychron K2",loja:"Amazon",usd:119,peso:870,tipo:"solido",volume:0,status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:null},
 ];
 
-// Estado inicial temporário até o primeiro snapshot do Firestore chegar.
-const _initSettings = INITIAL_SETTINGS;
-const _initProdutos = SAMPLE_PRODUTOS;
-const _initItensLegais = [];
-const _initGastos = [];
+// Load persisted state or use defaults
+const _saved = loadState();
+const _initSettings = _saved?.settings || INITIAL_SETTINGS;
+const _initProdutos = _saved?.produtos || SAMPLE_PRODUTOS;
+const _initItensLegais = _saved?.itensLegais || [];
+const _initGastos = _saved?.gastos || [];
 
-
-// ─── LOGIN ───────────────────────────────────────────────────────────────────
-function LoginScreen() {
-  const [email, setEmail] = useState("");
-  const [senha, setSenha] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [erro, setErro] = useState("");
-
-  async function entrar() {
-    if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
-    setLoading(true); setErro("");
-    try {
-      await signInWithEmailAndPassword(auth, email.trim(), senha);
-    } catch (e) {
-      setErro(traduzErroAuth(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function criarConta() {
-    if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
-    if (senha.length < 6) { setErro("A senha precisa ter pelo menos 6 caracteres."); return; }
-    setLoading(true); setErro("");
-    try {
-      await createUserWithEmailAndPassword(auth, email.trim(), senha);
-    } catch (e) {
-      setErro(traduzErroAuth(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <div style={{minHeight:"100vh",background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-      <div style={{width:"100%",maxWidth:390,background:C.bgCard,borderRadius:24,padding:26,boxShadow:"0 24px 70px rgba(15,23,42,0.25)",border:"1px solid rgba(255,255,255,0.35)"}}>
-        <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}>
-          <div style={{width:48,height:48,borderRadius:16,background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:25,color:"white"}}>✈</div>
-          <div>
-            <div style={{fontSize:24,fontWeight:850,color:C.text,letterSpacing:"-0.7px"}}>TravelShop</div>
-            <div style={{fontSize:13,color:C.textMid}}>Entre para sincronizar PC e celular</div>
-          </div>
-        </div>
-
-        <label style={S.label}>E-mail</label>
-        <input style={S.input} type="email" placeholder="seuemail@exemplo.com" value={email} onChange={e=>setEmail(e.target.value)} autoComplete="email" />
-
-        <label style={S.label}>Senha</label>
-        <input style={S.input} type="password" placeholder="mínimo 6 caracteres" value={senha} onChange={e=>setSenha(e.target.value)} autoComplete="current-password" onKeyDown={e=>{if(e.key==="Enter")entrar();}} />
-
-        {erro&&<div style={{background:C.dangerLight,color:C.danger,border:`1px solid ${C.danger}33`,borderRadius:12,padding:"10px 12px",fontSize:13,fontWeight:600,marginBottom:12}}>{erro}</div>}
-
-        <button style={{...S.btnPrimary,opacity:loading?0.7:1}} disabled={loading} onClick={entrar}>{loading?"Aguarde...":"Entrar"}</button>
-        <button style={{...S.btnOutline,width:"100%",justifyContent:"center",marginTop:10,padding:"12px"}} disabled={loading} onClick={criarConta}>Criar Conta</button>
-
-        <div style={{fontSize:12,color:C.textLight,textAlign:"center",marginTop:16,lineHeight:1.4}}>
-          Seus produtos, gastos e configurações serão salvos no Firebase dentro do seu usuário.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function traduzErroAuth(e) {
-  const code = e?.code || "";
-  if (code.includes("invalid-email")) return "E-mail inválido.";
-  if (code.includes("user-not-found") || code.includes("wrong-password") || code.includes("invalid-credential")) return "E-mail ou senha incorretos.";
-  if (code.includes("email-already-in-use")) return "Esse e-mail já tem uma conta. Use Entrar.";
-  if (code.includes("weak-password")) return "A senha precisa ter pelo menos 6 caracteres.";
-  if (code.includes("network-request-failed")) return "Falha de internet. Verifique a conexão.";
-  return "Não foi possível autenticar. Tente novamente.";
-}
 
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
@@ -261,94 +187,13 @@ export default function App() {
   const [editGasto, setEditGasto] = useState(null);
   const [notification, setNotification] = useState(null);
   const [cotacaoLoading, setCotacaoLoading] = useState(false);
-  const [user, setUser] = useState(null);
-  const [authReady, setAuthReady] = useState(false);
-  const [cloudReady, setCloudReady] = useState(false);
-  const skipNextCloudSave = useRef(false);
-  const userDocRef = useMemo(() => user ? doc(db, "usuarios_pwa", user.uid) : null, [user]);
 
-  // Verifica login/logout pelo Firebase Authentication.
+  // Auto-save to localStorage whenever data changes
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
-      setAuthReady(true);
-      setCloudReady(false);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  // Escuta em tempo real os dados do usuário logado.
-  useEffect(() => {
-    if (!userDocRef || !user) return;
-
-    const unsubscribe = onSnapshot(userDocRef, async (snap) => {
-      if (!snap.exists()) {
-        skipNextCloudSave.current = true;
-        await saveCloudState(userDocRef, {
-          settings: INITIAL_SETTINGS,
-          produtos: SAMPLE_PRODUTOS,
-          itensLegais: [],
-          gastos: [],
-        });
-        setSettings(INITIAL_SETTINGS);
-        setProdutos(SAMPLE_PRODUTOS);
-        setItensLegais([]);
-        setGastos([]);
-        setCloudReady(true);
-        return;
-      }
-
-      const cloudState = normalizeCloudState(snap.data());
-      skipNextCloudSave.current = true;
-      setSettings(cloudState.settings);
-      setProdutos(cloudState.produtos);
-      setItensLegais(cloudState.itensLegais);
-      setGastos(cloudState.gastos);
-      setCloudReady(true);
-    }, (error) => {
-      console.error("Erro ao sincronizar com Firestore:", error);
-      notify("Erro ao sincronizar com a nuvem", "error");
-      setCloudReady(true);
-    });
-
-    return () => unsubscribe();
-  }, [userDocRef, user]);
-
-  // Salva alterações locais direto no Firestore. Não usa mais LocalStorage nem ID pela URL.
-  useEffect(() => {
-    if (!userDocRef || !cloudReady) return;
-    if (skipNextCloudSave.current) {
-      skipNextCloudSave.current = false;
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos })
-        .catch((error) => {
-          console.error("Erro ao salvar no Firestore:", error);
-          notify("Erro ao salvar na nuvem", "error");
-        });
-    }, 350);
-
-    return () => clearTimeout(timer);
-  }, [settings, produtos, itensLegais, gastos, cloudReady, userDocRef]);
+    saveState({ settings, produtos, itensLegais, gastos });
+  }, [settings, produtos, itensLegais, gastos]);
 
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
-
-  async function handleLogout() {
-    try {
-      await signOut(auth);
-      setUser(null);
-      setSettings(INITIAL_SETTINGS);
-      setProdutos(SAMPLE_PRODUTOS);
-      setItensLegais([]);
-      setGastos([]);
-      setCloudReady(false);
-    } catch (e) {
-      console.error("Erro ao sair:", e);
-      notify("Erro ao sair", "error");
-    }
-  }
 
   function toggleStatus(id) {
     setProdutos(ps => ps.map(p => {
@@ -418,17 +263,6 @@ export default function App() {
 
   const TABS=[{label:"Início",icon:"⊞"},{label:"Produtos",icon:"📦"},{label:"Galeria",icon:"▦"},{label:"Gastos",icon:"💸"},{label:"Stats",icon:"◈"},{label:"Calc",icon:"⟨⟩"}];
 
-
-  if (!authReady) {
-    return (
-      <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",background:C.bg,color:C.textMid,fontWeight:700}}>
-        Carregando...
-      </div>
-    );
-  }
-
-  if (!user) return <LoginScreen />;
-
   return (
     <div style={S.app}>
       <style>{CSS}</style>
@@ -441,12 +275,9 @@ export default function App() {
             <div style={S.headerSub}>Orlando 2027</div>
           </div>
         </div>
-        <div style={{display:"flex",gap:8,alignItems:"center"}}>
-          <button style={{...S.settingsBtn,width:"auto",padding:"0 10px",fontSize:12,fontWeight:700,color:C.textMid}} onClick={handleLogout}>Sair</button>
-          <button style={S.settingsBtn} onClick={()=>setShowSettings(true)}>
+        <button style={S.settingsBtn} onClick={()=>setShowSettings(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.textMid} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
           </button>
-        </div>
       </div>
 
       <div style={S.content}>
