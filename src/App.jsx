@@ -70,48 +70,181 @@ async function fetchCotacao() {
 
 // ─── IMAGE SCRAPER ────────────────────────────────────────────────────────────
 const imageCache = {};
-async function fetchOgImage(url) {
+
+function normalizeUrl(url, baseUrl) {
   if (!url) return null;
   try {
-    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
-    const res = await fetch(proxy, { signal: AbortSignal.timeout(8000) });
-    const json = await res.json();
-    const html = json.contents || "";
-    const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
-           || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i)
-           || html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
-    return m?.[1] || null;
-  } catch { return null; }
+    return new URL(url, baseUrl).href;
+  } catch {
+    return url;
+  }
 }
-async function fetchDDGImage(query) {
+
+async function fetchOgImage(url) {
+  if (!url) return null;
+
   try {
-    const proxy = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`)}`;
+    const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
     const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
-    const json = await res.json();
-    const html = json.contents || "";
-    const vqd = html.match(/vqd=([\d-]+)/)?.[1];
-    if (!vqd) return null;
-    const apiProxy = `https://api.allorigins.win/get?url=${encodeURIComponent(`https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${vqd}&p=1&o=json`)}`;
-    const apiRes = await fetch(apiProxy, { signal: AbortSignal.timeout(10000) });
-    const apiJson = await apiRes.json();
-    const results = JSON.parse(apiJson.contents||"{}").results||[];
-    return results.find(r=>r.image&&r.width>200&&r.height>200)?.image || results[0]?.image || null;
-  } catch { return null; }
+    const html = await res.text();
+
+    const patterns = [
+      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+      /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<meta[^>]+property=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+      /<link[^>]+rel=["']image_src["'][^>]+href=["']([^"']+)["']/i,
+      /<img[^>]+src=["']([^"']+)["'][^>]*>/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match?.[1]) return normalizeUrl(match[1], url);
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
 }
+
+async function fetchDDGImage(query) {
+  if (!query) return null;
+
+  try {
+    const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}&iax=images&ia=images`;
+    const proxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(searchUrl)}`;
+    const res = await fetch(proxy, { signal: AbortSignal.timeout(10000) });
+    const html = await res.text();
+
+    const vqd = html.match(/vqd=["']?([\d-]+)["']?/)?.[1];
+    if (!vqd) return null;
+
+    const apiUrl = `https://duckduckgo.com/i.js?q=${encodeURIComponent(query)}&vqd=${vqd}&p=1&o=json`;
+    const apiProxy = `https://api.allorigins.win/raw?url=${encodeURIComponent(apiUrl)}`;
+    const apiRes = await fetch(apiProxy, { signal: AbortSignal.timeout(10000) });
+    const data = await apiRes.json();
+
+    const results = data?.results || [];
+    const best =
+      results.find(r => r.image && r.width > 250 && r.height > 250) ||
+      results[0];
+
+    return best?.image || null;
+  } catch {
+    return null;
+  }
+}
+
 async function getProductImage(p) {
   const key = String(p.id);
+
+  // Se já tem imagem preenchida manualmente, NÃO substitui
+  if (p.imagem?.trim()) {
+    imageCache[key] = p.imagem.trim();
+    return p.imagem.trim();
+  }
+
   if (imageCache[key] !== undefined) return imageCache[key];
-  if (p.imagem) { imageCache[key]=p.imagem; return p.imagem; }
-  const og = p.link ? await fetchOgImage(p.link) : null;
-  if (og) { imageCache[key]=og; return og; }
-  const ddg = await fetchDDGImage(`${p.nome} ${p.loja} product`);
-  imageCache[key] = ddg;
-  return ddg;
+
+  // Primeiro tenta buscar pelo link do anúncio
+  const byLink = p.link?.trim() ? await fetchOgImage(p.link.trim()) : null;
+  if (byLink) {
+    imageCache[key] = byLink;
+    return byLink;
+  }
+
+  // Se não achar pelo link, busca na internet pelo nome
+  const query = [p.nome, p.loja, "product"].filter(Boolean).join(" ");
+  const byName = await fetchDDGImage(query);
+
+  imageCache[key] = byName || null;
+  return imageCache[key];
 }
 
 const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
 
 function ProductImage({ produto, style={}, iconSize=44 }) {
+  const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)] || null);
+  const [loading, setLoading] = useState(
+    imageCache[String(produto.id)] === undefined && !produto.imagem
+  );
+  const [err, setErr] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    const key = String(produto.id);
+
+    setErr(false);
+
+    // Se a imagem foi preenchida manualmente, usa ela e não busca outra
+    if (produto.imagem?.trim()) {
+      imageCache[key] = produto.imagem.trim();
+      setImgUrl(produto.imagem.trim());
+      setLoading(false);
+      return;
+    }
+
+    // Se já buscou antes, reutiliza o cache
+    if (imageCache[key] !== undefined) {
+      setImgUrl(imageCache[key]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    getProductImage(produto).then(url => {
+      if (cancelled) return;
+      setImgUrl(url);
+      setLoading(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [produto.id, produto.link, produto.imagem, produto.nome, produto.loja]);
+
+  if (!imgUrl || err) {
+    return (
+      <div style={{
+        width:"100%",
+        height:"100%",
+        display:"flex",
+        flexDirection:"column",
+        alignItems:"center",
+        justifyContent:"center",
+        background:`linear-gradient(135deg,${C.primaryLight},${C.purpleLight})`,
+        ...style
+      }}>
+        {loading ? (
+          <div className="spinner"/>
+        ) : (
+          <span style={{fontSize:iconSize}}>
+            {LOJA_EMOJI[produto.loja] || "🛍"}
+          </span>
+        )}
+
+        {loading && (
+          <div style={{fontSize:10,color:C.textLight,marginTop:4}}>
+            Buscando...
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{width:"100%",height:"100%",...style}}>
+      <img
+        src={imgUrl}
+        alt={produto.nome}
+        style={{width:"100%",height:"100%",objectFit:"cover"}}
+        onError={() => setErr(true)}
+      />
+    </div>
+  );
+}) {
   const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)]||null);
   const [loading, setLoading] = useState(imageCache[String(produto.id)]===undefined && !produto.imagem);
   const [err, setErr] = useState(false);
