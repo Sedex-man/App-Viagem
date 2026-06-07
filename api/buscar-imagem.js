@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-
   const url = req.query.url;
 
   if (!url) {
@@ -9,10 +8,10 @@ export default async function handler(req, res) {
   }
 
   try {
-
     const response = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36"
       }
     });
 
@@ -20,22 +19,47 @@ export default async function handler(req, res) {
 
     let image = null;
 
-    const ogImage = html.match(
+    // OG IMAGE
+    const og = html.match(
       /<meta[^>]*property=["']og:image["'][^>]*content=["']([^"']+)["']/i
     );
 
-    if (ogImage) {
-      image = ogImage[1];
-    }
+    if (og) image = og[1];
 
+    // TWITTER IMAGE
     if (!image) {
-      const twitterImage = html.match(
+      const tw = html.match(
         /<meta[^>]*name=["']twitter:image["'][^>]*content=["']([^"']+)["']/i
       );
 
-      if (twitterImage) {
-        image = twitterImage[1];
-      }
+      if (tw) image = tw[1];
+    }
+
+    // JSON-LD
+    if (!image) {
+      const jsonLd = html.match(
+        /"image"\s*:\s*"([^"]+)"/i
+      );
+
+      if (jsonLd) image = jsonLd[1];
+    }
+
+    // Walmart CDN
+    if (!image) {
+      const walmart = html.match(
+        /https:\/\/i5\.walmartimages\.com\/[^"']+/i
+      );
+
+      if (walmart) image = walmart[0];
+    }
+
+    // Qualquer JPG
+    if (!image) {
+      const jpg = html.match(
+        /https?:\/\/[^"']+\.(jpg|jpeg|png|webp)/i
+      );
+
+      if (jpg) image = jpg[0];
     }
 
     return res.status(200).json({
