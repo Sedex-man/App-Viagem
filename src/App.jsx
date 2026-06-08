@@ -100,13 +100,35 @@ function calcTotalGastosUSD(gastos) {
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
 async function fetchCotacao() {
+  // Tenta múltiplas fontes em paralelo — retorna a primeira que responder
+  const sources = [
+    // Frankfurter (ECB) — muito rápido
+    fetch("https://api.frankfurter.app/latest?from=USD&to=BRL", { signal: AbortSignal.timeout(4000) })
+      .then(r => r.json()).then(d => {
+        const v = d?.rates?.BRL;
+        return v ? { bid: v, pct: null } : null;
+      }).catch(() => null),
+    // ExchangeRate-API (gratuita, sem chave)
+    fetch("https://open.er-api.com/v6/latest/USD", { signal: AbortSignal.timeout(4000) })
+      .then(r => r.json()).then(d => {
+        const v = d?.rates?.BRL;
+        return v ? { bid: v, pct: null } : null;
+      }).catch(() => null),
+    // AwesomeAPI (fallback — tem pctChange)
+    fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(5000) })
+      .then(r => r.json()).then(d => {
+        const bid = parseFloat(d?.USDBRL?.bid);
+        const pct = parseFloat(d?.USDBRL?.pctChange);
+        return !isNaN(bid) ? { bid, pct: !isNaN(pct) ? pct : null } : null;
+      }).catch(() => null),
+  ];
+  // Retorna primeira que resolver com valor válido
   try {
-    const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(5000) });
-    const data = await res.json();
-    const bid = parseFloat(data?.USDBRL?.bid);
-    if (!isNaN(bid)) return bid;
-  } catch {}
-  return null;
+    const result = await Promise.any(sources.map(p => p.then(v => v ?? Promise.reject())));
+    return result?.bid ?? null;
+  } catch {
+    return null;
+  }
 }
 
 const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
@@ -623,14 +645,19 @@ function CotacaoBcbCard({settings}) {
 
   async function buscarCotacao() {
     setLoading(true);
+    const sources = [
+      fetch("https://api.frankfurter.app/latest?from=USD&to=BRL", {signal:AbortSignal.timeout(3000)})
+        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
+      fetch("https://open.er-api.com/v6/latest/USD", {signal:AbortSignal.timeout(3000)})
+        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
+      fetch("https://economia.awesomeapi.com.br/last/USD-BRL", {signal:AbortSignal.timeout(5000)})
+        .then(r=>r.json()).then(d=>{ const bid=parseFloat(d?.USDBRL?.bid); const pct=parseFloat(d?.USDBRL?.pctChange); return !isNaN(bid)?{bid,pct:!isNaN(pct)?pct:null}:null; }).catch(()=>null),
+    ];
     try {
-      const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", {signal:AbortSignal.timeout(6000)});
-      const data = await res.json();
-      const bid = parseFloat(data?.USDBRL?.bid);
-      const pct = parseFloat(data?.USDBRL?.pctChange);
-      if (!isNaN(bid)) {
-        setRate(bid);
-        setVariacao(pct);
+      const result = await Promise.any(sources.map(p=>p.then(v=>v??Promise.reject())));
+      if (result?.bid) {
+        setRate(result.bid);
+        setVariacao(result.pct);
         setLastFetch(new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}));
       }
     } catch {}
