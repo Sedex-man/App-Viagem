@@ -124,21 +124,23 @@ function calcTotalGastosUSD(gastos) {
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
 async function fetchCotacao() {
-  // API do Banco Central do Brasil — sem CORS, sem chave
-  try {
-    const hoje = new Date().toISOString().slice(0,10).replace(/-/g,"");
-    const ontem = new Date(Date.now()-86400000).toISOString().slice(0,10).replace(/-/g,"");
-    const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao=%27${hoje}%27&$top=1&$format=json&$select=cotacaoVenda`;
-    const urlOntem = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao=%27${ontem}%27&$top=1&$format=json&$select=cotacaoVenda`;
-    for (const u of [url, urlOntem]) {
-      try {
-        const res = await fetch(u, { signal: AbortSignal.timeout(5000) });
-        const d = await res.json();
-        const bid = parseFloat(d?.value?.[0]?.cotacaoVenda);
-        if (!isNaN(bid) && bid > 1) return { bid, pct: null, source: "BCB" };
-      } catch {}
-    }
-  } catch {}
+  // API PTAX BCB — endpoint JSON mais estável
+  // Tenta os últimos 5 dias úteis (cobre fins de semana e feriados)
+  for (let i = 0; i < 5; i++) {
+    try {
+      const d = new Date(Date.now() - i * 86400000);
+      const mm = String(d.getMonth()+1).padStart(2,"0");
+      const dd = String(d.getDate()).padStart(2,"0");
+      const yyyy = d.getFullYear();
+      const dataFmt = `${mm}-${dd}-${yyyy}`; // formato MM-DD-YYYY do BCB
+      const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@d)?@d=%27${dataFmt}%27&$top=1&$format=json&$select=cotacaoVenda`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const bid = parseFloat(data?.value?.[0]?.cotacaoVenda);
+      if (!isNaN(bid) && bid > 1) return { bid, pct: null, source: "BCB" };
+    } catch {}
+  }
   return null;
 }
 
