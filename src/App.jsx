@@ -89,7 +89,9 @@ function calcMinhaParteUSD(gasto) {
   return Math.max(0, totalUSD - somaDivisao);
 }
 function usdToBRL(usd, gasto, settings) {
-  const cotacao = parseFloat(gasto.dolarPago) || settings.dollarPago;
+  // Se o gasto tem cotação específica registrada, usar ela (já inclui o custo real pago)
+  // Se não, usar o dólar ajustado com IOF+spread para refletir o custo real
+  const cotacao = parseFloat(gasto.dolarPago) || calcDolarAjustado(settings);
   return usd * cotacao;
 }
 function calcTotalGastosUSD(gastos) {
@@ -1401,10 +1403,16 @@ function SimuladorTab({settings, gastos, parcelas}) {
     return a+Math.max(0,qt-pagas)*(parseFloat(p.minhaParte||p.valorParcela)||0)/qt;
   },0)*parcelas.reduce((a,p)=>{const qt=parseInt(p.quantidadeParcelas)||0;const pagas=(p.statusMensal||[]).filter(Boolean).length;return a+Math.max(0,qt-pagas);},0)/Math.max(1,parcelas.reduce((a,p)=>{const qt=parseInt(p.quantidadeParcelas)||0;return a+qt;},0));
   const totalParcelasRestBRL = parcelas.reduce((a,p)=>{
-    const qt=parseInt(p.quantidadeParcelas)||0; const pagas=(p.statusMensal||[]).filter(Boolean).length; const vp=parseFloat(p.minhaParte&&p.valorTotal?(p.minhaParte/p.valorTotal)*(p.valorParcela||0):p.valorParcela)||0;
-    return a+Math.max(0,qt-pagas)*vp;
+    const qt=parseInt(p.quantidadeParcelas)||0;
+    const pagas=(p.statusMensal||[]).filter(Boolean).length;
+    const restante=Math.max(0,qt-pagas);
+    // Se tem minhaParte: é o total da minha parte, então valor/parcela = minhaParte/qt
+    // Se não tem: usar valorParcela inteiro
+    const mp=parseFloat(p.minhaParte)||0;
+    const vp=mp>0&&qt>0 ? mp/qt : (parseFloat(p.valorParcela)||0);
+    return a+restante*vp;
   },0);
-  const usdGastosEmBRL = totalGastosUSD * settings.dollarPago;
+  const usdGastosEmBRL = totalGastosUSD * calcDolarAjustado(settings);
   const totalViagem = usdGastosEmBRL + totalParcelasRestBRL;
 
   return (
@@ -1417,7 +1425,7 @@ function SimuladorTab({settings, gastos, parcelas}) {
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Composição do custo</div>
         {[
-          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × R$ ${fmtN(settings.dollarPago,2)}`},
+          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(calcDolarAjustado(settings),4)} (c/ IOF+spread)`},
           {label:"💳 Parcelas restantes (BRL)",value:fmtBRL(totalParcelasRestBRL),color:C.purple,sub:`${parcelas.filter(p=>(p.statusMensal||[]).some(s=>!s)).length} itens com parcelas a pagar`},
           {label:"📊 Total comprometido",value:fmtBRL(totalViagem),color:C.text,sub:""},
         ].map(({label,value,color,sub})=>(
@@ -1732,10 +1740,11 @@ function ParcelasTab({ parcelas, setParcelas }) {
   const [editItem, setEditItem] = useState(null);
 
   const minhaParcelaMensal = p => {
-    const vt = parseFloat(p.valorTotal) || 0;
+    const qt = parseInt(p.quantidadeParcelas) || 0;
     const mp = parseFloat(p.minhaParte) || 0;
     const vp = parseFloat(p.valorParcela) || 0;
-    if (mp > 0 && vt > 0) return parseFloat(((mp / vt) * vp).toFixed(2));
+    // minhaParte = total da minha parte; valor mensal = minhaParte / qtd de parcelas
+    if (mp > 0 && qt > 0) return parseFloat((mp / qt).toFixed(2));
     return vp;
   };
   const totalMensal = parcelas.reduce((a, p) => a + minhaParcelaMensal(p), 0);
