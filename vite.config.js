@@ -13,6 +13,7 @@ export default defineConfig({
         skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Nenhuma API externa em cache — só assets do próprio app
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -52,9 +53,14 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] }
             }
           },
-          // BCB PTAX — NetworkOnly (não faz sentido cachear cotação)
+          // BCB e qualquer API externa: NetworkOnly (sem cache)
           {
             urlPattern: /^https:\/\/olinda\.bcb\.gov\.br\/.*/i,
+            handler: 'NetworkOnly',
+          },
+          // Bloquear AwesomeAPI explicitamente (evitar que SW antigo interfira)
+          {
+            urlPattern: /^https:\/\/economia\.awesomeapi\.com\.br\/.*/i,
             handler: 'NetworkOnly',
           },
         ]
