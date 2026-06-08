@@ -100,39 +100,33 @@ function calcTotalGastosUSD(gastos) {
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
 async function fetchCotacao() {
-  // Tenta múltiplas fontes em paralelo — retorna a primeira que responder
-  const YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/USDBRL=X?interval=1d&range=1d";
-  const sources = [
-    // Yahoo Finance via proxy — mais rápido e preciso
-    fetch(`https://corsproxy.io/?${encodeURIComponent(YAHOO_URL)}`, { signal: AbortSignal.timeout(4000) })
-      .then(r => r.json()).then(d => {
-        const price = d?.chart?.result?.[0]?.meta?.regularMarketPrice;
-        const prev  = d?.chart?.result?.[0]?.meta?.chartPreviousClose;
-        const bid   = parseFloat(price);
-        const pct   = prev ? parseFloat(((bid - prev) / prev * 100).toFixed(2)) : null;
-        return !isNaN(bid) ? { bid, pct } : null;
-      }).catch(() => null),
-    // AwesomeAPI — fallback 1, mercado real
-    fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(4000) })
-      .then(r => r.json()).then(d => {
-        const bid = parseFloat(d?.USDBRL?.bid);
-        const pct = parseFloat(d?.USDBRL?.pctChange);
-        return !isNaN(bid) ? { bid, pct: !isNaN(pct) ? pct : null } : null;
-      }).catch(() => null),
-    // ExchangeRate-API — fallback 2
-    fetch("https://open.er-api.com/v6/latest/USD", { signal: AbortSignal.timeout(5000) })
-      .then(r => r.json()).then(d => {
-        const v = d?.rates?.BRL;
-        return v ? { bid: v, pct: null } : null;
-      }).catch(() => null),
-  ];
-  // Retorna primeira que resolver com valor válido
-  try {
-    const result = await Promise.any(sources.map(p => p.then(v => v ?? Promise.reject())));
-    return result?.bid ?? null;
-  } catch {
-    return null;
+  const YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/USDBRL=X?interval=1m&range=1d";
+  // 1. Tentar Yahoo Finance via dois proxies CORS
+  for (const proxy of [
+    `https://corsproxy.io/?${encodeURIComponent(YAHOO)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(YAHOO)}`,
+  ]) {
+    try {
+      const res = await fetch(proxy, { signal: AbortSignal.timeout(4000) });
+      const d   = await res.json();
+      const meta = d?.chart?.result?.[0]?.meta;
+      const bid  = parseFloat(meta?.regularMarketPrice);
+      const prev = parseFloat(meta?.chartPreviousClose);
+      if (!isNaN(bid) && bid > 1) {
+        const pct = !isNaN(prev) ? parseFloat(((bid - prev) / prev * 100).toFixed(2)) : null;
+        return { bid, pct };
+      }
+    } catch {}
   }
+  // 2. Fallback: AwesomeAPI
+  try {
+    const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(5000) });
+    const d   = await res.json();
+    const bid = parseFloat(d?.USDBRL?.bid);
+    const pct = parseFloat(d?.USDBRL?.pctChange);
+    if (!isNaN(bid)) return { bid, pct: !isNaN(pct) ? pct : null };
+  } catch {}
+  return null;
 }
 
 const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
@@ -649,23 +643,12 @@ function CotacaoBcbCard({settings}) {
 
   async function buscarCotacao() {
     setLoading(true);
-    const YAHOO_URL = "https://query1.finance.yahoo.com/v8/finance/chart/USDBRL=X?interval=1d&range=1d";
-    const sources = [
-      fetch(`https://corsproxy.io/?${encodeURIComponent(YAHOO_URL)}`, {signal:AbortSignal.timeout(4000)})
-        .then(r=>r.json()).then(d=>{ const price=d?.chart?.result?.[0]?.meta?.regularMarketPrice; const prev=d?.chart?.result?.[0]?.meta?.chartPreviousClose; const bid=parseFloat(price); const pct=prev?parseFloat(((bid-prev)/prev*100).toFixed(2)):null; return !isNaN(bid)?{bid,pct}:null; }).catch(()=>null),
-      fetch("https://economia.awesomeapi.com.br/last/USD-BRL", {signal:AbortSignal.timeout(4000)})
-        .then(r=>r.json()).then(d=>{ const bid=parseFloat(d?.USDBRL?.bid); const pct=parseFloat(d?.USDBRL?.pctChange); return !isNaN(bid)?{bid,pct:!isNaN(pct)?pct:null}:null; }).catch(()=>null),
-      fetch("https://open.er-api.com/v6/latest/USD", {signal:AbortSignal.timeout(5000)})
-        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
-    ];
-    try {
-      const result = await Promise.any(sources.map(p=>p.then(v=>v??Promise.reject())));
-      if (result?.bid) {
-        setRate(result.bid);
-        setVariacao(result.pct);
-        setLastFetch(new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}));
-      }
-    } catch {}
+    const result = await fetchCotacao();
+    if (result?.bid) {
+      setRate(result.bid);
+      setVariacao(result.pct);
+      setLastFetch(new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}));
+    }
     setLoading(false);
   }
 
