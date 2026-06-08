@@ -163,6 +163,65 @@ function parseSheet(wb, sheetName) {
   });
 }
 
+// ─── PARCELAS PARSER ─────────────────────────────────────────────────────────
+function parseParcelasSheet(wb, sheetName) {
+  const ws = wb.Sheets[sheetName];
+  if (!ws) return [];
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+  // Encontrar linha de cabeçalho: deve ter "Descrição" e "Parcelas"
+  const hi = rows.findIndex(r =>
+    r && r.some(c => c && c.toString().toLowerCase().includes("descrição"))
+       && r.some(c => c && c.toString().toLowerCase().includes("parcela"))
+  );
+  if (hi < 0) return [];
+
+  const hd = rows[hi];
+  const idx = name => hd.findIndex(h => h && h.toString().toLowerCase().includes(name.toLowerCase()));
+
+  const iDesc   = idx("descrição");
+  const iQtd    = idx("parcelas");
+  const iValP   = idx("valor / parcela");   // "Valor / Parcela (R$)"
+  const iValT   = idx("total da compra");   // "Total da Compra (R$)"
+  const iFatura = idx("primeira fatura");   // "Primeira Fatura" — usado como cartão/referência
+
+  const result = [];
+  for (let i = hi + 1; i < rows.length; i++) {
+    const r = rows[i];
+    if (!r) continue;
+    const desc = r[iDesc];
+    // Parar ao encontrar linha vazia ou seção nova (ex: "DISTRIBUIÇÃO")
+    if (!desc || typeof desc !== "string" || desc.toString().trim() === "") break;
+    if (desc.toString().toUpperCase().includes("DISTRIBUIÇÃO")) break;
+
+    const qt = parseInt(r[iQtd]) || 0;
+    const valorParcela = parseFloat(
+      r[iValP] !== null && r[iValP] !== undefined
+        ? r[iValP].toString().replace(/[R$\s.]/g, "").replace(",", ".")
+        : 0
+    ) || 0;
+    const valorTotal = parseFloat(
+      r[iValT] !== null && r[iValT] !== undefined
+        ? r[iValT].toString().replace(/[R$\s.]/g, "").replace(",", ".")
+        : 0
+    ) || 0;
+    const cartao = r[iFatura] ? r[iFatura].toString().trim() : "";
+
+    if (qt <= 0 || !desc.trim()) continue;
+
+    result.push({
+      id: Date.now() + i + Math.random(),
+      descricao: desc.toString().trim(),
+      valorTotal: valorTotal || parseFloat((valorParcela * qt).toFixed(2)),
+      quantidadeParcelas: qt,
+      valorParcela,
+      cartao,
+      statusMensal: Array(qt).fill(false),
+    });
+  }
+  return result;
+}
+
 // ─── SAMPLE DATA ─────────────────────────────────────────────────────────────
 const SAMPLE_PRODUTOS = [
   {id:1,nome:"AirPods Pro 2",loja:"Apple",usd:249,peso:61,tipo:"solido",volume:0,status:"pendente",prioridade:"Alta",link:"https://www.amazon.com/Apple-AirPods-Pro-Cancellation-Transparency/dp/B0BDHWDR12",imagem:"",dollarPago:null},
@@ -402,10 +461,12 @@ export default function App() {
     setItensLegais(ps=>ps.filter(p=>p.id!==item.id)); notify("Movido para lista!");
   }
 
-  function handleImport(compras,legais) {
+  function handleImport(compras,legais,parcelasImp=[]) {
     if(compras.length) setProdutos(prev=>{const e=new Set(prev.map(p=>p.nome.toLowerCase()));return [...prev,...compras.filter(p=>!e.has(p.nome.toLowerCase()))];});
     if(legais.length) setItensLegais(prev=>{const e=new Set(prev.map(p=>p.nome.toLowerCase()));return [...prev,...legais.filter(p=>!e.has(p.nome.toLowerCase()))];});
-    notify(`✅ ${compras.length} compras + ${legais.length} itens importados!`);
+    if(parcelasImp.length) setParcelas(prev=>{const e=new Set(prev.map(p=>p.descricao.toLowerCase()));return [...prev,...parcelasImp.filter(p=>!e.has(p.descricao.toLowerCase()))];});
+    const parts=[compras.length?`${compras.length} compras`:"",legais.length?`${legais.length} legais`:"",parcelasImp.length?`${parcelasImp.length} parcelas`:""].filter(Boolean).join(" + ");
+    notify(`✅ ${parts} importados!`);
     setShowSettings(false);
   }
 
@@ -1516,9 +1577,11 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
       try { const data=new Uint8Array(e.target.result); const wb=XLSX.read(data,{type:"array"}); const sheets=wb.SheetNames;
         const comprasSheet=sheets.find(s=>s.toLowerCase().includes("compras")&&!s.toLowerCase().includes("parcelas"));
         const legaisSheet=sheets.find(s=>s.toLowerCase().includes("legais")||s.toLowerCase().includes("legal"));
+        const parcelasSheet=sheets.find(s=>s.toLowerCase().includes("parcela"));
         const compras=comprasSheet?parseSheet(wb,comprasSheet):[];
         const legais=legaisSheet?parseSheet(wb,legaisSheet):[];
-        setPreview({compras,legais,comprasSheet,legaisSheet}); setLoading(false);
+        const parcelas=parcelasSheet?parseParcelasSheet(wb,parcelasSheet):[];
+        setPreview({compras,legais,comprasSheet,legaisSheet,parcelas,parcelasSheet}); setLoading(false);
       } catch(err){setError("Erro: "+err.message); setLoading(false);}
     };
     reader.readAsArrayBuffer(file);
@@ -1566,7 +1629,7 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
           {preview&&(
             <div style={{marginTop:14}}>
               <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Prévia</div>
-              {[["Aba Compras",preview.comprasSheet||"—"],["Aba Legais",preview.legaisSheet||"—"],["Produtos",`${preview.compras.length} itens`],["Legais",`${preview.legais.length} itens`]].map(([l,v])=>(
+              {[["Aba Compras",preview.comprasSheet||"—"],["Aba Legais",preview.legaisSheet||"—"],["Aba Parcelas",preview.parcelasSheet||"—"],["Produtos",`${preview.compras.length} itens`],["Legais",`${preview.legais.length} itens`],["Parcelas",`${(preview.parcelas||[]).length} itens`]].map(([l,v])=>(
                 <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
                   <span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:600,color:C.text}}>{v}</span>
                 </div>
@@ -1574,7 +1637,7 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
               {preview.compras.slice(0,3).map((p,i)=>(
                 <div key={i} style={{fontSize:12,color:C.textMid,padding:"4px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontWeight:600,color:C.text}}>{p.nome}</span> · {p.loja} · US${p.usd}</div>
               ))}
-              <button style={{...S.btnPrimary,marginTop:12}} onClick={()=>{onImport(preview.compras,preview.legais);setPreview(null);}}>✅ Confirmar importação</button>
+              <button style={{...S.btnPrimary,marginTop:12}} onClick={()=>{onImport(preview.compras,preview.legais,preview.parcelas||[]);setPreview(null);}}>✅ Confirmar importação</button>
             </div>
           )}
         </>
