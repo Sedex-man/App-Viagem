@@ -110,11 +110,13 @@ async function fetchCotacao() {
       const res = await fetch(proxy, { signal: AbortSignal.timeout(4000) });
       const d   = await res.json();
       const meta = d?.chart?.result?.[0]?.meta;
-      const bid  = parseFloat(meta?.regularMarketPrice);
-      const prev = parseFloat(meta?.chartPreviousClose);
-      if (!isNaN(bid) && bid > 1) {
-        const pct = !isNaN(prev) ? parseFloat(((bid - prev) / prev * 100).toFixed(2)) : null;
-        return { bid, pct };
+      // Usar ask se disponível (é o valor que o Yahoo exibe na tela)
+      // senão regularMarketPrice, senão bid
+      const price = parseFloat(meta?.ask) || parseFloat(meta?.regularMarketPrice) || parseFloat(meta?.bid);
+      const prev  = parseFloat(meta?.chartPreviousClose);
+      if (!isNaN(price) && price > 1) {
+        const pct = !isNaN(prev) ? parseFloat(((price - prev) / prev * 100).toFixed(2)) : null;
+        return { bid: price, pct, source: "Yahoo" };
       }
     } catch {}
   }
@@ -640,6 +642,7 @@ function CotacaoBcbCard({settings}) {
   const [loading, setLoading] = useState(false);
   const [lastFetch, setLastFetch] = useState(null);
   const [variacao, setVariacao] = useState(null);
+  const [source, setSource] = useState(null);
 
   async function buscarCotacao() {
     setLoading(true);
@@ -647,6 +650,7 @@ function CotacaoBcbCard({settings}) {
     if (result?.bid) {
       setRate(result.bid);
       setVariacao(result.pct);
+      setSource(result.source||null);
       setLastFetch(new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}));
     }
     setLoading(false);
@@ -673,7 +677,7 @@ function CotacaoBcbCard({settings}) {
                   </span>
                 )}
               </div>
-              <div style={{fontSize:11,color:C.textLight,marginTop:1}}>mercado às {lastFetch}</div>
+              <div style={{fontSize:11,color:C.textLight,marginTop:1}}>{source==="Yahoo"?"Yahoo · delay 15min · ":""}às {lastFetch}</div>
             </>
           )}
           {!loading && !rate && <div style={{fontSize:12,color:C.textLight}}>Toque para buscar</div>}
