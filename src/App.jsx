@@ -758,6 +758,7 @@ function CotacaoBcbCard({settings}) {
 }
 
 // ─── ROTEIRO TAB ──────────────────────────────────────────────────────────────
+const MESES_LABELS=["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
 const MESES_NOMES=["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
 const MESES_SELECT=["jan/25","fev/25","mar/25","abr/25","mai/25","jun/25","jul/25","ago/25","set/25","out/25","nov/25","dez/25","jan/26","fev/26","mar/26","abr/26","mai/26","jun/26","jul/26","ago/26","set/26","out/26","nov/26","dez/26","jan/27","fev/27","mar/27","abr/27","mai/27","jun/27","jul/27","ago/27","set/27","out/27","nov/27","dez/27"];
 function addMeses(mesAno,offset){if(!mesAno)return"";const[m,a]=mesAno.split("/");const mi=MESES_NOMES.indexOf(m.toLowerCase());if(mi<0)return mesAno;const total=mi+offset;const mes=MESES_NOMES[total%12];const ano=(parseInt("20"+a)+Math.floor(total/12)).toString().slice(-2);return`${mes}/${ano}`;}
@@ -1414,9 +1415,6 @@ function GastoForm({gasto,settings,onSave,onClose}) {
 
 
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
-const MESES_LABELS = ["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
-const MESES_NOMES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
-const MESES_SELECT = ["jan/25","fev/25","mar/25","abr/25","mai/25","jun/25","jul/25","ago/25","set/25","out/25","nov/25","dez/25","jan/26","fev/26","mar/26","abr/26","mai/26","jun/26","jul/26","ago/26","set/26","out/26","nov/26","dez/26","jan/27","fev/27","mar/27","abr/27","mai/27","jun/27","jul/27","ago/27","set/27","out/27","nov/27","dez/27"];
 
 // Dado "abr/26" e offset 0,1,2... retorna "abr/26","mai/26","jun/26"...
 function addMeses(mesAno, offset) {
