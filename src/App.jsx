@@ -124,11 +124,20 @@ function calcTotalGastosUSD(gastos) {
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
 async function fetchCotacao() {
+  // API do Banco Central do Brasil — sem CORS, sem chave
   try {
-    const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(5000) });
-    const data = await res.json();
-    const bid = parseFloat(data?.USDBRL?.bid);
-    if (!isNaN(bid)) return bid;
+    const hoje = new Date().toISOString().slice(0,10).replace(/-/g,"");
+    const ontem = new Date(Date.now()-86400000).toISOString().slice(0,10).replace(/-/g,"");
+    const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao=%27${hoje}%27&$top=1&$format=json&$select=cotacaoVenda`;
+    const urlOntem = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@dataCotacao)?@dataCotacao=%27${ontem}%27&$top=1&$format=json&$select=cotacaoVenda`;
+    for (const u of [url, urlOntem]) {
+      try {
+        const res = await fetch(u, { signal: AbortSignal.timeout(5000) });
+        const d = await res.json();
+        const bid = parseFloat(d?.value?.[0]?.cotacaoVenda);
+        if (!isNaN(bid) && bid > 1) return { bid, pct: null, source: "BCB" };
+      } catch {}
+    }
   } catch {}
   return null;
 }
@@ -736,7 +745,7 @@ function CotacaoBcbCard({settings}) {
               <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>
               {variacao!==null&&<span style={{fontSize:12,fontWeight:700,color:varPos?C.danger:C.success}}>{varPos?"▲":"▼"} {Math.abs(variacao).toFixed(2)}%</span>}
             </div>
-            <div style={{fontSize:11,color:C.textLight,marginTop:1}}>{source==="Yahoo"?"Yahoo · delay 15min · ":""}às {lastFetch}</div>
+            <div style={{fontSize:11,color:C.textLight,marginTop:1}}>{source==="BCB"?"BCB PTAX · ":""}às {lastFetch}</div>
           </>)}
           {!loading&&!rate&&<div style={{fontSize:12,color:C.textLight}}>Toque para buscar</div>}
         </div>
