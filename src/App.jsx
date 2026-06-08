@@ -17,6 +17,7 @@ const normalizeCloudState = data => ({
   itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
   gastos: Array.isArray(data?.gastos) ? data.gastos : [],
   parcelas: Array.isArray(data?.parcelas) ? data.parcelas : [],
+  planejamento: data?.planejamento || { dataInicio: "", dataFim: "", eventos: [] },
 });
 
 async function saveCloudState(userDocRef, state) {
@@ -333,6 +334,7 @@ export default function App() {
   const [itensLegais, setItensLegais] = useState(_initItensLegais);
   const [gastos, setGastos] = useState(_initGastos); // gastos livres + produtos comprados espelhados
   const [parcelas, setParcelas] = useState([]);
+  const [planejamento, setPlanejamento] = useState({ dataInicio: "", dataFim: "", eventos: [] });
   const [showSettings, setShowSettings] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showGastoForm, setShowGastoForm] = useState(false);
@@ -370,12 +372,14 @@ export default function App() {
           itensLegais: [],
           gastos: [],
           parcelas: [],
+          planejamento: { dataInicio: "", dataFim: "", eventos: [] },
         });
         setSettings(INITIAL_SETTINGS);
         setProdutos(SAMPLE_PRODUTOS);
         setItensLegais([]);
         setGastos([]);
         setParcelas([]);
+        setPlanejamento({ dataInicio: "", dataFim: "", eventos: [] });
         setCloudReady(true);
         return;
       }
@@ -387,6 +391,7 @@ export default function App() {
       setItensLegais(cloudState.itensLegais);
       setGastos(cloudState.gastos);
       setParcelas(cloudState.parcelas || []);
+      setPlanejamento(cloudState.planejamento || { dataInicio: "", dataFim: "", eventos: [] });
       setCloudReady(true);
     }, (error) => {
       console.error("Erro ao sincronizar com Firestore:", error);
@@ -406,7 +411,7 @@ export default function App() {
     }
 
     const timer = setTimeout(() => {
-      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas })
+      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento })
         .catch((error) => {
           console.error("Erro ao salvar no Firestore:", error);
           notify("Erro ao salvar na nuvem", "error");
@@ -414,7 +419,7 @@ export default function App() {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [settings, produtos, itensLegais, gastos, parcelas, cloudReady, userDocRef]);
+  }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, cloudReady, userDocRef]);
 
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
 
@@ -427,6 +432,7 @@ export default function App() {
       setItensLegais([]);
       setGastos([]);
       setParcelas([]);
+      setPlanejamento({ dataInicio: "", dataFim: "", eventos: [] });
       setCloudReady(false);
     } catch (e) {
       console.error("Erro ao sair:", e);
@@ -502,7 +508,7 @@ export default function App() {
   const pesoColor=pesoPercent<70?C.success:pesoPercent<90?C.warning:C.danger;
   const pesoBg=pesoPercent<70?C.successLight:pesoPercent<90?C.warningLight:C.dangerLight;
 
-  const TABS=[{label:"Início",icon:"⊞"},{label:"Produtos",icon:"📦"},{label:"Galeria",icon:"▦"},{label:"Gastos",icon:"💸"},{label:"Parcelas",icon:"💳"},{label:"Stats",icon:"◈"},{label:"Calc",icon:"⟨⟩"}];
+  const TABS=[{label:"Início",icon:"⊞"},{label:"Produtos",icon:"📦"},{label:"Galeria",icon:"▦"},{label:"Gastos",icon:"💸"},{label:"Parcelas",icon:"💳"},{label:"Roteiro",icon:"🗓"},{label:"Stats",icon:"◈"},{label:"Calc",icon:"⟨⟩"}];
 
 
   if (!authReady) {
@@ -541,8 +547,9 @@ export default function App() {
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
-        {tab===5&&<StatsTab produtos={produtos} gastos={gastos} settings={settings}/>}
-        {tab===6&&<CalcTab settings={settings}/>}
+        {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
+        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings}/>}
+        {tab===7&&<CalcTab settings={settings}/>}
       </div>
 
       <nav style={S.nav}>
@@ -1284,6 +1291,347 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       )}
 
       <button style={S.btnPrimary} onClick={salvar}>{parcela ? "Salvar alterações" : "Adicionar parcela"}</button>
+    </Modal>
+  );
+}
+
+
+// ─── ROTEIRO TAB ──────────────────────────────────────────────────────────────
+function RoteiroTab({ planejamento, setPlanejamento }) {
+  const { dataInicio, dataFim, eventos } = planejamento;
+  const [showEventoForm, setShowEventoForm] = useState(false);
+  const [editEvento, setEditEvento] = useState(null);
+  const [mesCalendario, setMesCalendario] = useState(() => {
+    if (planejamento.dataInicio) return planejamento.dataInicio.slice(0, 7);
+    return new Date().toISOString().slice(0, 7);
+  });
+
+  const hoje = new Date().toISOString().slice(0, 10);
+
+  // Eventos do dia de hoje
+  const eventosHoje = eventos.filter(e => e.data === hoje).sort((a,b) => (a.hora||"99:99").localeCompare(b.hora||"99:99"));
+
+  // Verificar se hoje está dentro do período da viagem
+  const viagemAtiva = dataInicio && dataFim && hoje >= dataInicio && hoje <= dataFim;
+  const viagemFutura = dataInicio && hoje < dataInicio;
+  const diasRestantes = dataInicio ? Math.ceil((new Date(dataInicio) - new Date(hoje)) / 86400000) : null;
+
+  function salvarConfig(campo, valor) {
+    setPlanejamento(p => ({ ...p, [campo]: valor }));
+  }
+
+  function salvarEvento(ev) {
+    if (ev.id) {
+      setPlanejamento(p => ({ ...p, eventos: p.eventos.map(e => e.id === ev.id ? ev : e) }));
+    } else {
+      setPlanejamento(p => ({ ...p, eventos: [...p.eventos, { ...ev, id: Date.now() }] }));
+    }
+    setShowEventoForm(false);
+    setEditEvento(null);
+  }
+
+  function excluirEvento(id) {
+    setPlanejamento(p => ({ ...p, eventos: p.eventos.filter(e => e.id !== id) }));
+  }
+
+  // Agrupar eventos por data para exibição
+  const eventosPorData = useMemo(() => {
+    const map = {};
+    eventos.forEach(e => {
+      if (!map[e.data]) map[e.data] = [];
+      map[e.data].push(e);
+    });
+    Object.values(map).forEach(arr => arr.sort((a,b) => (a.hora||"99:99").localeCompare(b.hora||"99:99")));
+    return map;
+  }, [eventos]);
+
+  // Datas do período da viagem
+  const datasViagem = useMemo(() => {
+    if (!dataInicio || !dataFim) return new Set();
+    const datas = new Set();
+    const cur = new Date(dataInicio);
+    const fim = new Date(dataFim);
+    while (cur <= fim) {
+      datas.add(cur.toISOString().slice(0, 10));
+      cur.setDate(cur.getDate() + 1);
+    }
+    return datas;
+  }, [dataInicio, dataFim]);
+
+  return (
+    <div style={S.page}>
+      {/* Hero / Status */}
+      <div style={S.heroCard}>
+        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Roteiro da viagem</div>
+        {viagemAtiva ? (
+          <>
+            <div style={{fontSize:22,fontWeight:800,color:"#fff"}}>✈ Hoje é dia de viagem!</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:4}}>Aproveite cada momento 🎉</div>
+          </>
+        ) : viagemFutura && diasRestantes !== null ? (
+          <>
+            <div style={{fontSize:26,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>{diasRestantes} dias</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:2}}>para a viagem começar 🗓</div>
+          </>
+        ) : (
+          <>
+            <div style={{fontSize:20,fontWeight:700,color:"#fff"}}>Planeje sua viagem</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:2}}>Configure as datas abaixo</div>
+          </>
+        )}
+        {/* Eventos de hoje */}
+        {eventosHoje.length > 0 && (
+          <div style={{marginTop:12,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"10px 12px"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.8)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Programação de hoje</div>
+            {eventosHoje.map(e => (
+              <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <span style={{fontSize:16}}>{e.emoji||"📌"}</span>
+                <div>
+                  <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{e.titulo}</span>
+                  {e.hora && <span style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginLeft:6}}>às {e.hora}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Configurar período */}
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>📅 Período da viagem</div>
+        <div style={{display:"flex",gap:10}}>
+          <div style={{flex:1}}>
+            <label style={S.label}>Data de ida</label>
+            <input style={S.input} type="date" value={dataInicio} onChange={e => salvarConfig("dataInicio", e.target.value)}/>
+          </div>
+          <div style={{flex:1}}>
+            <label style={S.label}>Data de volta</label>
+            <input style={S.input} type="date" value={dataFim} onChange={e => salvarConfig("dataFim", e.target.value)}/>
+          </div>
+        </div>
+        {dataInicio && dataFim && dataInicio <= dataFim && (
+          <div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginTop:4}}>
+            ✈ {Math.ceil((new Date(dataFim) - new Date(dataInicio)) / 86400000) + 1} dias de viagem · {new Date(dataInicio+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})} → {new Date(dataFim+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}
+          </div>
+        )}
+      </div>
+
+      {/* Calendário */}
+      <CalendarioViagem
+        mesCalendario={mesCalendario}
+        onMesChange={setMesCalendario}
+        datasViagem={datasViagem}
+        eventosPorData={eventosPorData}
+        hoje={hoje}
+        dataInicio={dataInicio}
+        dataFim={dataFim}
+        onDiaClick={data => { setEditEvento({ data }); setShowEventoForm(true); }}
+      />
+
+      {/* Lista de eventos */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,marginTop:4}}>
+        <div style={{fontWeight:700,fontSize:14,color:C.text}}>Eventos ({eventos.length})</div>
+        <button style={{...S.btnPrimary,padding:"7px 14px",fontSize:13,marginBottom:0}} onClick={() => { setEditEvento(null); setShowEventoForm(true); }}>＋ Evento</button>
+      </div>
+
+      {eventos.length === 0 && <Empty text="Nenhum evento ainda. Toque em ＋ Evento ou clique em um dia no calendário."/>}
+
+      {Object.keys(eventosPorData).sort().map(data => (
+        <div key={data} style={{marginBottom:12}}>
+          <div style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>
+            {new Date(data+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"short",year:"numeric"})}
+            {data === hoje && <span style={{marginLeft:6,background:C.primary,color:"#fff",borderRadius:999,padding:"1px 8px",fontSize:10}}>Hoje</span>}
+          </div>
+          {eventosPorData[data].map(e => (
+            <div key={e.id} style={{...S.card,marginBottom:6,padding:"10px 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:36,height:36,borderRadius:10,background:C.primaryLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{e.emoji||"📌"}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:14,color:C.text}}>{e.titulo}</div>
+                  <div style={{fontSize:12,color:C.textLight,marginTop:1}}>
+                    {e.hora && <span>🕐 {e.hora}{e.horaFim?` → ${e.horaFim}`:""} · </span>}
+                    {e.local && <span>📍 {e.local}</span>}
+                  </div>
+                  {e.notas && <div style={{fontSize:12,color:C.textMid,marginTop:3}}>{e.notas}</div>}
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button style={{background:C.borderLight,border:"none",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:13}} onClick={() => { setEditEvento(e); setShowEventoForm(true); }}>✏</button>
+                  <button style={{background:C.dangerLight,border:"none",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:13,color:C.danger}} onClick={() => excluirEvento(e.id)}>🗑</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {showEventoForm && (
+        <EventoForm
+          evento={editEvento}
+          onSalvar={salvarEvento}
+          onClose={() => { setShowEventoForm(false); setEditEvento(null); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── CALENDÁRIO ───────────────────────────────────────────────────────────────
+function CalendarioViagem({ mesCalendario, onMesChange, datasViagem, eventosPorData, hoje, dataInicio, dataFim, onDiaClick }) {
+  const [ano, mes] = mesCalendario.split("-").map(Number);
+  const primeiroDia = new Date(ano, mes - 1, 1).getDay(); // 0=dom
+  const diasNoMes = new Date(ano, mes, 0).getDate();
+  const nomeMes = new Date(ano, mes - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+
+  function navMes(dir) {
+    const d = new Date(ano, mes - 1 + dir, 1);
+    onMesChange(d.toISOString().slice(0, 7));
+  }
+
+  // Ir para mês da viagem se configurado
+  function irParaViagem() {
+    if (dataInicio) onMesChange(dataInicio.slice(0, 7));
+  }
+
+  const celulas = [];
+  for (let i = 0; i < primeiroDia; i++) celulas.push(null);
+  for (let d = 1; d <= diasNoMes; d++) celulas.push(d);
+
+  return (
+    <div style={{...S.card,marginBottom:14,padding:"14px 10px"}}>
+      {/* Header do calendário */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <button onClick={() => navMes(-1)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.textMid,padding:"4px 8px"}}>‹</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontWeight:700,fontSize:14,color:C.text,textTransform:"capitalize"}}>{nomeMes}</div>
+          {dataInicio && mesCalendario !== dataInicio.slice(0,7) && (
+            <button onClick={irParaViagem} style={{background:"none",border:"none",fontSize:11,color:C.primary,cursor:"pointer",fontWeight:600}}>Ir para viagem →</button>
+          )}
+        </div>
+        <button onClick={() => navMes(1)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.textMid,padding:"4px 8px"}}>›</button>
+      </div>
+
+      {/* Labels dias da semana */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
+        {["D","S","T","Q","Q","S","S"].map((d,i) => (
+          <div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.textLight,padding:"2px 0"}}>{d}</div>
+        ))}
+      </div>
+
+      {/* Células */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+        {celulas.map((d, i) => {
+          if (!d) return <div key={i}/>;
+          const dataStr = `${ano}-${String(mes).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+          const eViagem = datasViagem.has(dataStr);
+          const eHoje = dataStr === hoje;
+          const eInicio = dataStr === dataInicio;
+          const eFim = dataStr === dataFim;
+          const qtEvs = (eventosPorData[dataStr] || []).length;
+
+          return (
+            <button key={i} onClick={() => onDiaClick(dataStr)} style={{
+              position:"relative",
+              aspectRatio:"1",
+              borderRadius: eInicio ? "10px 4px 4px 10px" : eFim ? "4px 10px 10px 4px" : eViagem ? "4px" : "8px",
+              border: eHoje ? `2px solid ${C.primary}` : "2px solid transparent",
+              background: eHoje ? C.primary : eInicio || eFim ? C.primary : eViagem ? C.primaryLight : "transparent",
+              color: eHoje || eInicio || eFim ? "#fff" : eViagem ? C.primary : C.text,
+              fontWeight: eHoje || eViagem ? 700 : 400,
+              fontSize: 13,
+              cursor:"pointer",
+              display:"flex",
+              flexDirection:"column",
+              alignItems:"center",
+              justifyContent:"center",
+              padding:"2px",
+            }}>
+              {d}
+              {qtEvs > 0 && (
+                <div style={{
+                  width: qtEvs > 1 ? 14 : 6,
+                  height: 4,
+                  borderRadius: 999,
+                  background: eHoje || eInicio || eFim ? "rgba(255,255,255,0.8)" : C.primary,
+                  marginTop: 1,
+                  fontSize: 8,
+                  display:"flex",
+                  alignItems:"center",
+                  justifyContent:"center",
+                  color: eHoje ? C.primary : "#fff",
+                  fontWeight:700,
+                }}>{qtEvs > 1 ? qtEvs : ""}</div>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Legenda */}
+      <div style={{display:"flex",gap:12,marginTop:10,flexWrap:"wrap"}}>
+        {[
+          {bg:C.primary,color:"#fff",label:"Hoje / Chegada / Volta"},
+          {bg:C.primaryLight,color:C.primary,label:"Período da viagem"},
+        ].map(({bg,color,label})=>(
+          <div key={label} style={{display:"flex",alignItems:"center",gap:5}}>
+            <div style={{width:14,height:14,borderRadius:4,background:bg}}/>
+            <span style={{fontSize:10,color:C.textLight}}>{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── EVENTO FORM ──────────────────────────────────────────────────────────────
+const EMOJIS_EVENTO = ["📌","✈","🏨","🎡","🛍","🍔","🎢","🌊","🎭","🚗","⛵","🎠","🎪","🎟","🏖","🌴","🎆","🎇","🎑","🎈"];
+
+function EventoForm({ evento, onSalvar, onClose }) {
+  const empty = { titulo: "", data: "", hora: "", horaFim: "", local: "", notas: "", emoji: "📌" };
+  const [f, setF] = useState(evento?.id ? { ...evento } : { ...empty, ...(evento?.data ? { data: evento.data } : {}) });
+
+  function salvar() {
+    if (!f.titulo.trim()) return alert("Informe o título do evento");
+    if (!f.data) return alert("Informe a data");
+    onSalvar({ ...f, titulo: f.titulo.trim() });
+  }
+
+  return (
+    <Modal title={evento?.id ? "Editar evento" : "Novo evento"} onClose={onClose}>
+      {/* Emoji picker */}
+      <label style={S.label}>Ícone</label>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+        {EMOJIS_EVENTO.map(e => (
+          <button key={e} onClick={() => setF(p => ({...p, emoji: e}))} style={{
+            width:36,height:36,borderRadius:8,border:`2px solid ${f.emoji===e?C.primary:C.border}`,
+            background:f.emoji===e?C.primaryLight:"transparent",fontSize:18,cursor:"pointer"
+          }}>{e}</button>
+        ))}
+      </div>
+
+      <label style={S.label}>Título *</label>
+      <input style={S.input} placeholder="Ex: Universal Studios, Almoço no CityWalk..." value={f.titulo} onChange={e => setF(p => ({...p, titulo: e.target.value}))}/>
+
+      <label style={S.label}>Data *</label>
+      <input style={S.input} type="date" value={f.data} onChange={e => setF(p => ({...p, data: e.target.value}))}/>
+
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1}}>
+          <label style={S.label}>Horário (opcional)</label>
+          <input style={S.input} type="time" value={f.hora} onChange={e => setF(p => ({...p, hora: e.target.value}))}/>
+        </div>
+        <div style={{flex:1}}>
+          <label style={S.label}>Até (opcional)</label>
+          <input style={S.input} type="time" value={f.horaFim} onChange={e => setF(p => ({...p, horaFim: e.target.value}))}/>
+        </div>
+      </div>
+
+      <label style={S.label}>Local (opcional)</label>
+      <input style={S.input} placeholder="Ex: Universal Orlando Resort" value={f.local} onChange={e => setF(p => ({...p, local: e.target.value}))}/>
+
+      <label style={S.label}>Notas (opcional)</label>
+      <input style={S.input} placeholder="Ex: Levar protetor solar, reserva confirmada..." value={f.notas} onChange={e => setF(p => ({...p, notas: e.target.value}))}/>
+
+      <button style={S.btnPrimary} onClick={salvar}>{evento?.id ? "Salvar alterações" : "Adicionar evento"}</button>
     </Modal>
   );
 }
