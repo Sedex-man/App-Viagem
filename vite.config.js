@@ -7,16 +7,13 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      // Ativar SW imediatamente sem esperar reload
       injectRegister: 'auto',
       workbox: {
         clientsClaim: true,
         skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
-        // Aumentar limite para bundles grandes do Firebase
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         runtimeCaching: [
-          // Fontes Google
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: 'CacheFirst',
@@ -35,7 +32,6 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] }
             }
           },
-          // Firebase Firestore — NetworkFirst com fallback de cache
           {
             urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
             handler: 'NetworkFirst',
@@ -46,7 +42,6 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] }
             }
           },
-          // Firebase Auth
           {
             urlPattern: /^https:\/\/identitytoolkit\.googleapis\.com\/.*/i,
             handler: 'NetworkFirst',
@@ -57,16 +52,10 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] }
             }
           },
-          // Cotação (AwesomeAPI / Yahoo proxy)
+          // BCB PTAX — NetworkOnly (não faz sentido cachear cotação)
           {
-            urlPattern: /^https:\/\/economia\.awesomeapi\.com\.br\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'cotacao-cache',
-              networkTimeoutSeconds: 4,
-              expiration: { maxEntries: 3, maxAgeSeconds: 300 },
-              cacheableResponse: { statuses: [0, 200] }
-            }
+            urlPattern: /^https:\/\/olinda\.bcb\.gov\.br\/.*/i,
+            handler: 'NetworkOnly',
           },
         ]
       },
