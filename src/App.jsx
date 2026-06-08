@@ -102,24 +102,24 @@ function calcTotalGastosUSD(gastos) {
 async function fetchCotacao() {
   // Tenta múltiplas fontes em paralelo — retorna a primeira que responder
   const sources = [
-    // Frankfurter (ECB) — muito rápido
-    fetch("https://api.frankfurter.app/latest?from=USD&to=BRL", { signal: AbortSignal.timeout(4000) })
+    // AwesomeAPI — cotação de mercado real (bid), tem pctChange
+    fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(4000) })
       .then(r => r.json()).then(d => {
-        const v = d?.rates?.BRL;
-        return v ? { bid: v, pct: null } : null;
+        const bid = parseFloat(d?.USDBRL?.bid);
+        const pct = parseFloat(d?.USDBRL?.pctChange);
+        return !isNaN(bid) ? { bid, pct: !isNaN(pct) ? pct : null } : null;
       }).catch(() => null),
-    // ExchangeRate-API (gratuita, sem chave)
+    // ExchangeRate-API — mercado, atualização frequente
     fetch("https://open.er-api.com/v6/latest/USD", { signal: AbortSignal.timeout(4000) })
       .then(r => r.json()).then(d => {
         const v = d?.rates?.BRL;
         return v ? { bid: v, pct: null } : null;
       }).catch(() => null),
-    // AwesomeAPI (fallback — tem pctChange)
-    fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(5000) })
+    // Frankfurter (ECB) — fallback, cotação oficial mas defasada
+    fetch("https://api.frankfurter.app/latest?from=USD&to=BRL", { signal: AbortSignal.timeout(5000) })
       .then(r => r.json()).then(d => {
-        const bid = parseFloat(d?.USDBRL?.bid);
-        const pct = parseFloat(d?.USDBRL?.pctChange);
-        return !isNaN(bid) ? { bid, pct: !isNaN(pct) ? pct : null } : null;
+        const v = d?.rates?.BRL;
+        return v ? { bid: v, pct: null } : null;
       }).catch(() => null),
   ];
   // Retorna primeira que resolver com valor válido
@@ -646,12 +646,12 @@ function CotacaoBcbCard({settings}) {
   async function buscarCotacao() {
     setLoading(true);
     const sources = [
-      fetch("https://api.frankfurter.app/latest?from=USD&to=BRL", {signal:AbortSignal.timeout(3000)})
-        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
-      fetch("https://open.er-api.com/v6/latest/USD", {signal:AbortSignal.timeout(3000)})
-        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
-      fetch("https://economia.awesomeapi.com.br/last/USD-BRL", {signal:AbortSignal.timeout(5000)})
+      fetch("https://economia.awesomeapi.com.br/last/USD-BRL", {signal:AbortSignal.timeout(4000)})
         .then(r=>r.json()).then(d=>{ const bid=parseFloat(d?.USDBRL?.bid); const pct=parseFloat(d?.USDBRL?.pctChange); return !isNaN(bid)?{bid,pct:!isNaN(pct)?pct:null}:null; }).catch(()=>null),
+      fetch("https://open.er-api.com/v6/latest/USD", {signal:AbortSignal.timeout(4000)})
+        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
+      fetch("https://api.frankfurter.app/latest?from=USD&to=BRL", {signal:AbortSignal.timeout(5000)})
+        .then(r=>r.json()).then(d=>{ const v=d?.rates?.BRL; return v?{bid:v,pct:null}:null; }).catch(()=>null),
     ];
     try {
       const result = await Promise.any(sources.map(p=>p.then(v=>v??Promise.reject())));
