@@ -693,18 +693,19 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
 
       {filtrados.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente."/>}
 
-      {filtrados.map(g=><GastoCard key={g.id} g={g} settings={settings} onEdit={()=>onEdit(g)} onDelete={()=>onDelete(g.id)} onTogglePago={onTogglePago}/>)}
+      {filtrados.map(g=><GastoCard key={g.id} g={g} settings={settings} onEdit={()=>onEdit(g)} onDelete={()=>onDelete(g.id)} onTogglePago={onTogglePago} produtos={produtos}/>)}
     </div>
   );
 }
 
-function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
+function GastoCard({g,settings,onEdit,onDelete,onTogglePago,produtos}) {
   const [expanded,setExpanded]=useState(false);
   const totalUSD=parseFloat(g.usd)||0;
   const minhaUSD=calcMinhaParteUSD(g);
   const minhaBRL=usdToBRL(minhaUSD,g,settings);
   const totalBRL=usdToBRL(totalUSD,g,settings);
   const cotUsada=parseFloat(g.dolarPago)||settings.dollarPago;
+  const imgSrc = g.imagem || (g.produtoId&&produtos?.find(p=>p.id===g.produtoId)?.imagem) || "";
   const temDivisao=g.divisao&&g.divisao.length>0;
   const totalPessoas=temDivisao?1+g.divisao.length:1;
   const aReceberUSD=temDivisao?g.divisao.filter(p=>!p.pago).reduce((s,p)=>s+(parseFloat(p.valor)||0),0):0;
@@ -712,8 +713,13 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
   return (
     <div style={{...S.card,marginBottom:10}}>
       <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-        <div style={{width:40,height:40,borderRadius:12,background:g.tipo==="produto"?C.primaryLight:C.purpleLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
-          {LOJA_EMOJI[g.loja]||g.categoria?.split(" ")[0]||"💳"}
+        <div style={{width:40,height:40,borderRadius:12,background:g.tipo==="produto"?C.primaryLight:C.purpleLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0,overflow:"hidden"}}>
+          {imgSrc
+            ? <img src={imgSrc} alt="" style={{width:"100%",height:"100%",objectFit:"cover",borderRadius:12}} onError={e=>{e.target.style.display="none";e.target.nextSibling.style.display="flex";}} />
+            : null}
+          <span style={{display:imgSrc?"none":"flex",alignItems:"center",justifyContent:"center",width:"100%",height:"100%"}}>
+            {LOJA_EMOJI[g.loja]||g.categoria?.split(" ")[0]||"💳"}
+          </span>
         </div>
         <div style={{flex:1}} onClick={()=>setExpanded(e=>!e)}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
