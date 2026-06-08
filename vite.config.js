@@ -7,7 +7,70 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['icon-192.png', 'icon-512.png'],
+      // Ativar SW imediatamente sem esperar reload
+      injectRegister: 'auto',
+      workbox: {
+        clientsClaim: true,
+        skipWaiting: true,
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
+        // Aumentar limite para bundles grandes do Firebase
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        runtimeCaching: [
+          // Fontes Google
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60*60*24*365 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gstatic-fonts-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60*60*24*365 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+          // Firebase Firestore — NetworkFirst com fallback de cache
+          {
+            urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'firestore-cache',
+              networkTimeoutSeconds: 5,
+              expiration: { maxEntries: 20, maxAgeSeconds: 60*60*24 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+          // Firebase Auth
+          {
+            urlPattern: /^https:\/\/identitytoolkit\.googleapis\.com\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'firebase-auth-cache',
+              networkTimeoutSeconds: 5,
+              expiration: { maxEntries: 5, maxAgeSeconds: 60*60 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+          // Cotação (AwesomeAPI / Yahoo proxy)
+          {
+            urlPattern: /^https:\/\/economia\.awesomeapi\.com\.br\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'cotacao-cache',
+              networkTimeoutSeconds: 4,
+              expiration: { maxEntries: 3, maxAgeSeconds: 300 },
+              cacheableResponse: { statuses: [0, 200] }
+            }
+          },
+        ]
+      },
+      includeAssets: ['image_a375cf.png', 'favicon.ico'],
       manifest: {
         name: 'TravelShop Orlando',
         short_name: 'TravelShop',
@@ -19,23 +82,8 @@ export default defineConfig({
         scope: '/',
         start_url: '/',
         icons: [
-          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
-          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
-        ]
-      },
-      workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: { cacheName: 'google-fonts-cache', expiration: { maxEntries: 10, maxAgeSeconds: 60*60*24*365 } }
-          },
-          {
-            urlPattern: /^https:\/\/economia\.awesomeapi\.com\.br\/.*/i,
-            handler: 'NetworkFirst',
-            options: { cacheName: 'api-cache', expiration: { maxEntries: 5, maxAgeSeconds: 300 } }
-          }
+          { src: 'image_a375cf.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'image_a375cf.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
         ]
       }
     })
