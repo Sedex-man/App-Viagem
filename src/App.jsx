@@ -1912,11 +1912,11 @@ function DistribuicaoFatura({ parcelas, minhaParcelaMensal, toggleMes }) {
               <td style={{padding:"8px 12px",fontWeight:700,color:C.primary,position:"sticky",left:0,background:C.primaryLight,zIndex:1}}>Total</td>
               {parcelasComData.map(p => (
                 <td key={p.id} style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace",fontSize:11}}>
-                  {fmtBRL(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0,2)}
+                  {(()=>{const mp=parseFloat(p.minhaParte)||0;const qt=parseInt(p.quantidadeParcelas)||0;const vp=parseFloat(p.valorParcela)||0;return fmtBRL(mp>0?mp:vp*qt,2);})()}
                 </td>
               ))}
               <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>
-                {fmtBRL(parcelasComData.reduce((a,p)=>a+(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0),0),2)}
+                {fmtBRL(parcelasComData.reduce((a,p)=>{ const mp=parseFloat(p.minhaParte)||0; const qt=parseInt(p.quantidadeParcelas)||0; const vp=parseFloat(p.valorParcela)||0; return a+(mp>0?mp:vp*qt); },0),2)}
               </td>
             </tr>
           </tbody>
@@ -1934,6 +1934,9 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
   const restante = qt - pagas;
   const pct = qt > 0 ? Math.round(pagas / qt * 100) : 0;
   const valorParcela = parseFloat(p.valorParcela) || 0;
+  const mp = parseFloat(p.minhaParte) || 0;
+  // Valor mensal da MINHA parte: se tem minhaParte, divide pelo total de parcelas
+  const meuValorMensal = mp > 0 && qt > 0 ? parseFloat((mp / qt).toFixed(2)) : valorParcela;
 
   return (
     <div style={{...S.card,marginBottom:10}}>
@@ -1946,7 +1949,7 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
               <div style={{fontSize:12,color:C.textLight,marginTop:2}}>{p.cartao||"—"} · {qt}x{p.primeiraFatura?` · desde ${p.primeiraFatura}`:""}</div>
             </div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:15,fontWeight:800,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(valorParcela,2)}<span style={{fontSize:10,fontWeight:500,color:C.textLight}}>/mês</span></div>
+              <div style={{fontSize:15,fontWeight:800,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(meuValorMensal,2)}<span style={{fontSize:10,fontWeight:500,color:C.textLight}}>/mês</span></div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>Total: {fmtBRL(parseFloat(p.valorTotal)||0)}</div>
               {p.minhaParte>0&&<div style={{fontSize:11,color:C.purple,fontFamily:"'DM Mono',monospace",fontWeight:600}}>Minha parte: {fmtBRL(p.minhaParte)}</div>}
             </div>
@@ -1986,7 +1989,7 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
           </div>
           {restante > 0 && (
             <div style={{background:C.warningLight,border:`1px solid ${C.warning}33`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.warning,fontWeight:600,marginBottom:12}}>
-              ⏳ {restante} parcela(s) restante(s) · {fmtBRL((restante*valorParcela),2)}
+              ⏳ {restante} parcela(s) restante(s) · {fmtBRL((restante*meuValorMensal),2)}
             </div>
           )}
           {restante === 0 && qt > 0 && (
