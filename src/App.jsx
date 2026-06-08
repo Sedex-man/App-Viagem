@@ -1416,24 +1416,6 @@ function GastoForm({gasto,settings,onSave,onClose}) {
 
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
 
-// Dado "abr/26" e offset 0,1,2... retorna "abr/26","mai/26","jun/26"...
-function addMeses(mesAno, offset) {
-  if (!mesAno) return "";
-  const [m, a] = mesAno.split("/");
-  const mi = MESES_NOMES.indexOf(m.toLowerCase());
-  if (mi < 0) return mesAno;
-  const total = mi + offset;
-  const mes = MESES_NOMES[total % 12];
-  const ano = (parseInt("20" + a) + Math.floor(total / 12)).toString().slice(-2);
-  return `${mes}/${ano}`;
-}
-
-// Comparar dois mesAno: retorna -1,0,1
-function compareMesAno(a, b) {
-  const parse = s => { const [m,y]=s.split("/"); return parseInt("20"+y)*12+MESES_NOMES.indexOf(m); };
-  return parse(a) - parse(b);
-}
-
 function parcelaVazia() {
   return {
     id: Date.now(),
