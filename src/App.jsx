@@ -289,7 +289,7 @@ function LoginScreen() {
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{width:"100%",maxWidth:390,background:C.bgCard,borderRadius:24,padding:26,boxShadow:"0 24px 70px rgba(15,23,42,0.25)",border:"1px solid rgba(255,255,255,0.35)"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}>
-          <div style={{width:48,height:48,borderRadius:16,background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:25,color:"white"}}>✈</div>
+          <img src="/image_a375cf.png" alt="TravelShop" style={{width:48,height:48,borderRadius:16,objectFit:"cover"}}/>
           <div>
             <div style={{fontSize:24,fontWeight:850,color:C.text,letterSpacing:"-0.7px"}}>TravelShop</div>
             <div style={{fontSize:13,color:C.textMid}}>Entre para sincronizar PC e celular</div>
@@ -521,7 +521,7 @@ export default function App() {
       {notification&&<div className={`notif notif-${notification.type}`}>{notification.msg}</div>}
       <div style={S.header}>
         <div style={S.headerLeft}>
-          <div style={S.logoBox}>✈</div>
+          <img src="/image_a375cf.png" alt="TravelShop" style={{width:36,height:36,borderRadius:10,objectFit:"cover"}}/>
           <div>
             <div style={S.headerTitle}>TravelShop</div>
             <div style={S.headerSub}>Orlando 2027</div>
