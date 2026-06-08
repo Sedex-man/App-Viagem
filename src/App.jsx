@@ -48,6 +48,12 @@ const calcBRL = (usd, s) => calcUsdFinal(usd, s) * calcDolarAjustado(s);
 const calcBRLPago = (usd, s, dp) => calcUsdFinal(usd, s) * dp;
 const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
 
+// ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
+// Formata número com vírgula como separador decimal (padrão pt-BR)
+const fmtUSD = (v, dec=2) => `US$ ${Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec})}`;
+const fmtBRL = (v, dec=2) => `R$ ${Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec})}`;
+const fmtN   = (v, dec=2) => Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec});
+
 // tudo em USD — dolarPago = cotação usada na compra
 function calcMinhaParteUSD(gasto) {
   const totalUSD = parseFloat(gasto.usd) || 0;
@@ -426,7 +432,7 @@ export default function App() {
         setGastos(gs => gs.some(g=>g.produtoId===id) ? gs : [...gs, {
           id: `prod_${id}`, produtoId:id, descricao:p.nome, loja:p.loja,
           usd:p.usd, dolarPago:p.dollarPago||settings.dollarPago,
-          brl: null,
+          brl: null, imagem:p.imagem||"",
           categoria:"🛍 Compras", divisao:[], data: new Date().toLocaleDateString("pt-BR"), tipo:"produto"
         }]);
       } else {
@@ -558,7 +564,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
       <div style={S.heroCard}>
         <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Total planejado</div>
         <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: R$ {settings.dollarPago.toFixed(4)} · Ajustado: R$ {calcDolarAjustado(settings).toFixed(4)}</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: {fmtBRL(settings.dollarPago,4)} · Ajustado: {fmtBRL(calcDolarAjustado(settings),4)}</div>
         <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
           {[`IOF ${settings.iof}%`,`Spread ${settings.spread}%`,`Taxa ${settings.taxa}%`].map(t=>(
             <span key={t} style={{background:"rgba(255,255,255,0.15)",borderRadius:999,padding:"3px 10px",fontSize:11,color:"rgba(255,255,255,0.9)",fontWeight:500}}>{t}</span>
@@ -571,12 +577,12 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
         <div style={{fontSize:12,fontWeight:600,color:C.success,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💵 Dólares na viagem</div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
           <div>
-            <div style={{fontSize:28,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>US$ {stats.valorTotalUSD.toFixed(2)}</div>
+            <div style={{fontSize:28,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(stats.valorTotalUSD,2)}</div>
             <div style={{fontSize:13,color:C.textMid,marginTop:2}}>planejado para compras</div>
           </div>
           <div style={{textAlign:"right"}}>
             <div style={{fontSize:16,fontWeight:700,color:usdRestante>=0?C.textMid:C.danger,fontFamily:"'DM Mono',monospace"}}>
-              {usdRestante>=0?"Sobra":"Falta"} US${Math.abs(usdRestante).toFixed(2)}
+              {usdRestante>=0?"Sobra":"Falta"} US${fmtN(Math.abs(usdRestante),2)}
             </div>
             <div style={{fontSize:12,color:C.textLight}}>de US$ {settings.totalDolarViagem} total</div>
           </div>
@@ -599,7 +605,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
       {/* Meus gastos reais */}
       <div style={{...S.card,background:"linear-gradient(135deg,#FFF7ED,#FFFBEB)",border:`1px solid ${C.warning}33`}}>
         <div style={{fontSize:12,fontWeight:600,color:C.warning,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💸 Meus gastos reais</div>
-        <div style={{fontSize:26,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>US$ {stats.totalMeusGastosUSD.toFixed(2)}</div>
+        <div style={{fontSize:26,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(stats.totalMeusGastosUSD,2)}</div>
         <div style={{fontSize:13,color:C.textMid,marginTop:2}}>≈ R$ {(stats.totalMeusGastosUSD*settings.dollarPago).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})} · apenas minha parte</div>
       </div>
 
@@ -619,7 +625,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
           <div style={{fontSize:12,color:C.textMid,marginBottom:8}}>{stats.comprados}/{stats.total} itens comprados</div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:11,color:C.textLight}}>⚖ Peso: {(stats.pesoTotal/1000).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}kg / {(settings.pesoMax/1000).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}kg</span>
-            <span style={{fontSize:11,color:pesoColor,fontWeight:700}}>{pesoPercent.toFixed(0)}%</span>
+            <span style={{fontSize:11,color:pesoColor,fontWeight:700}}>{fmtN(pesoPercent,0)}%</span>
           </div>
           <div style={{height:5,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
             <div style={{width:`${pesoPercent}%`,height:"100%",background:pesoColor,borderRadius:999}}/>
@@ -630,14 +636,14 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
       {/* Financeiro */}
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>💰 Resumo financeiro</div>
-        {[{label:"USD total planejado",value:`US$ ${stats.valorTotalUSD.toFixed(2)}`,color:C.primary},{label:"BRL previsto (c/ taxas)",value:`R$ ${stats.valorTotalBRL.toFixed(2)}`,color:C.text},{label:"BRL já gasto",value:`R$ ${stats.valorGasto.toFixed(2)}`,color:C.success},{label:"Meus gastos (USD)",value:`US$ ${stats.totalMeusGastosUSD.toFixed(2)}`,color:C.warning}].map(({label,value,color})=>(
+        {[{label:"USD total planejado",value:`${fmtUSD(stats.valorTotalUSD,2)}`,color:C.primary},{label:"BRL previsto (c/ taxas)",value:`${fmtBRL(stats.valorTotalBRL,2)}`,color:C.text},{label:"BRL já gasto",value:`${fmtBRL(stats.valorGasto,2)}`,color:C.success},{label:"Meus gastos (USD)",value:`${fmtUSD(stats.totalMeusGastosUSD,2)}`,color:C.warning}].map(({label,value,color})=>(
           <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${C.borderLight}`}}>
             <span style={{fontSize:13,color:C.textMid}}>{label}</span>
             <span style={{fontSize:14,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
           </div>
         ))}
       </div>
-      {pesoPercent>=80&&<div style={{background:pesoBg,border:`1px solid ${pesoColor}33`,borderRadius:12,padding:"10px 14px",fontSize:13,color:pesoColor,fontWeight:600,marginBottom:12}}>⚠ Peso da mala em {pesoPercent.toFixed(0)}% do limite!</div>}
+      {pesoPercent>=80&&<div style={{background:pesoBg,border:`1px solid ${pesoColor}33`,borderRadius:12,padding:"10px 14px",fontSize:13,color:pesoColor,fontWeight:600,marginBottom:12}}>⚠ Peso da mala em {fmtN(pesoPercent,0)}% do limite!</div>}
     </div>
   );
 }
@@ -663,12 +669,12 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
       {/* Resumo topo */}
       <div style={S.heroCard}>
         <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:4}}>Meus gastos totais</div>
-        <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>US$ {totalUSD.toFixed(2)}</div>
+        <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>{fmtUSD(totalUSD,2)}</div>
         <div style={{fontSize:13,color:"rgba(255,255,255,0.65)",marginTop:4}}>≈ R$ {(totalUSD*settings.dollarPago).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
         <div style={{display:"flex",gap:12,marginTop:12}}>
           <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 14px",flex:1,textAlign:"center"}}>
             <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginBottom:2}}>A receber</div>
-            <div style={{fontSize:15,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>US$ {aReceberUSD.toFixed(2)}</div>
+            <div style={{fontSize:15,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtUSD(aReceberUSD,2)}</div>
           </div>
           <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 14px",flex:1,textAlign:"center"}}>
             <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginBottom:2}}>Gastos</div>
@@ -715,9 +721,9 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
               <div style={{fontSize:12,color:C.textLight,marginTop:2}}>{g.loja||g.categoria} · {g.data}</div>
             </div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:15,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US$ {minhaUSD.toFixed(2)}</div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>≈ R$ {minhaBRL.toFixed(2)}</div>
-              {temDivisao&&<div style={{fontSize:11,color:C.textLight}}>de US$ {totalUSD.toFixed(2)} total</div>}
+              <div style={{fontSize:15,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(minhaUSD,2)}</div>
+              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>≈ {fmtBRL(minhaBRL,2)}</div>
+              {temDivisao&&<div style={{fontSize:11,color:C.textLight}}>de {fmtUSD(totalUSD,2)} total</div>}
             </div>
           </div>
           {temDivisao&&(
@@ -728,7 +734,7 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
                   {p.pago?"✓":"○"} {p.nome}
                 </button>
               ))}
-              {aReceberUSD>0&&<span style={{...S.tag,background:C.warningLight,color:C.warning,borderColor:C.warning+"33",fontSize:11}}>A receber US$ {aReceberUSD.toFixed(2)}</span>}
+              {aReceberUSD>0&&<span style={{...S.tag,background:C.warningLight,color:C.warning,borderColor:C.warning+"33",fontSize:11}}>A receber {fmtUSD(aReceberUSD,2)}</span>}
             </div>
           )}
         </div>
@@ -736,10 +742,10 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
           {[
-            {label:"Total USD",value:`US$ ${totalUSD.toFixed(2)}`,color:C.primary},
-            {label:"Minha parte USD",value:`US$ ${minhaUSD.toFixed(2)}`,color:C.primary},
-            {label:"Minha parte BRL",value:`R$ ${minhaBRL.toFixed(2)}`,color:C.textMid},
-            {label:"Cotação usada",value:`R$ ${cotUsada.toFixed(4)}`},
+            {label:"Total USD",value:`${fmtUSD(totalUSD,2)}`,color:C.primary},
+            {label:"Minha parte USD",value:`${fmtUSD(minhaUSD,2)}`,color:C.primary},
+            {label:"Minha parte BRL",value:`${fmtBRL(minhaBRL,2)}`,color:C.textMid},
+            {label:"Cotação usada",value:`${fmtBRL(cotUsada,4)}`},
             ...(temDivisao?[{label:"Dividido entre",value:`${totalPessoas} pessoas`}]:[]),
           ].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
@@ -754,7 +760,7 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
                 <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
                   <span style={{fontSize:13,color:C.text}}>{p.nome}</span>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:13,fontFamily:"'DM Mono',monospace",color:C.textMid}}>US$ {(parseFloat(p.valor)||0).toFixed(2)}</span>
+                    <span style={{fontSize:13,fontFamily:"'DM Mono',monospace",color:C.textMid}}>{fmtUSD((parseFloat(p.valor)||0),2)}</span>
                     <button onClick={()=>onTogglePago(g.id,i)} style={{background:p.pago?C.successLight:C.bg,border:`1px solid ${p.pago?C.success:C.border}`,borderRadius:8,padding:"3px 10px",fontSize:12,fontWeight:600,color:p.pago?C.success:C.textMid,cursor:"pointer"}}>
                       {p.pago?"✓ Pago":"Pendente"}
                     </button>
@@ -819,7 +825,7 @@ function GastoForm({gasto,settings,onSave,onClose}) {
       <label style={S.label}>Valor em USD *</label>
       <input style={S.input} type="number" step="0.01" placeholder="Ex: 45.90" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
       <div style={{background:C.primaryLight,border:`1px solid ${C.primary}22`,borderRadius:9,padding:"8px 12px",fontSize:12,color:C.textMid,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>R$ {(parseFloat(f.dolarPago)||settings.dollarPago).toFixed(4)}</strong></span>
+        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>{fmtBRL((parseFloat(f.dolarPago)||settings.dollarPago),4)}</strong></span>
         <span style={{color:C.textLight,fontSize:11}}>automática das configurações</span>
       </div>
       <label style={S.label}>Data</label>
@@ -830,15 +836,15 @@ function GastoForm({gasto,settings,onSave,onClose}) {
         <div style={{background:C.primaryLight,borderRadius:10,padding:"10px 14px",marginBottom:14}}>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:13,color:C.textMid}}>Total USD</span>
-            <span style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US$ {totalUSD.toFixed(2)}</span>
+            <span style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalUSD,2)}</span>
           </div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
             <span style={{fontSize:13,color:C.textMid}}>≈ Total BRL</span>
-            <span style={{fontSize:13,fontWeight:600,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>R$ {totalBRL.toFixed(2)}</span>
+            <span style={{fontSize:13,fontWeight:600,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(totalBRL,2)}</span>
           </div>
           <div style={{display:"flex",justifyContent:"space-between"}}>
             <span style={{fontSize:13,color:C.textMid}}>Minha parte ({nPessoas}p)</span>
-            <span style={{fontSize:14,fontWeight:700,color:C.success,fontFamily:"'DM Mono',monospace"}}>US$ {minhaParteUSD.toFixed(2)} · R$ {minhaParteBRL.toFixed(2)}</span>
+            <span style={{fontSize:14,fontWeight:700,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(minhaParteUSD,2)} · {fmtBRL(minhaParteBRL,2)}</span>
           </div>
         </div>
       )}
@@ -869,9 +875,9 @@ function GastoForm({gasto,settings,onSave,onClose}) {
         ))}
         {f.divisao.length>0&&(
           <div style={{background:C.successLight,border:`1px solid ${C.success}33`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.success,fontWeight:600}}>
-            ✓ Dividindo entre {nPessoas} pessoas · Sua parte: US$ {minhaParteUSD.toFixed(2)} · R$ {minhaParteBRL.toFixed(2)}
+            ✓ Dividindo entre {nPessoas} pessoas · Sua parte: {fmtUSD(minhaParteUSD,2)} · {fmtBRL(minhaParteBRL,2)}
             {Math.abs(somaDivisao+minhaParteUSD-totalUSD)>0.02&&totalUSD>0&&(
-              <div style={{fontSize:11,color:C.warning,marginTop:4,fontWeight:500}}>⚠ Soma das partes (US$ {(somaDivisao+minhaParteUSD).toFixed(2)}) ≠ total (US$ {totalUSD.toFixed(2)})</div>
+              <div style={{fontSize:11,color:C.warning,marginTop:4,fontWeight:500}}>⚠ Soma das partes ({fmtUSD((somaDivisao+minhaParteUSD),2)}) ≠ total ({fmtUSD(totalUSD,2)})</div>
             )}
           </div>
         )}
@@ -894,6 +900,8 @@ function parcelaVazia() {
     valorParcela: 0,
     cartao: "",
     statusMensal: Array(10).fill(false),
+    nPessoas: "",       // opcional: dividido entre N pessoas
+    minhaParte: "",     // minha parte do valorTotal
   };
 }
 
@@ -901,15 +909,22 @@ function ParcelasTab({ parcelas, setParcelas }) {
   const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
 
-  const totalMensal = parcelas.reduce((a, p) => a + (parseFloat(p.valorParcela) || 0), 0);
+  const minhaParcelaMensal = p => {
+    const vt = parseFloat(p.valorTotal) || 0;
+    const mp = parseFloat(p.minhaParte) || 0;
+    const vp = parseFloat(p.valorParcela) || 0;
+    if (mp > 0 && vt > 0) return parseFloat(((mp / vt) * vp).toFixed(2));
+    return vp;
+  };
+  const totalMensal = parcelas.reduce((a, p) => a + minhaParcelaMensal(p), 0);
   const totalPago = parcelas.reduce((a, p) => {
     const pagas = (p.statusMensal || []).filter(Boolean).length;
-    return a + pagas * (parseFloat(p.valorParcela) || 0);
+    return a + pagas * minhaParcelaMensal(p);
   }, 0);
   const totalRestante = parcelas.reduce((a, p) => {
     const qt = parseInt(p.quantidadeParcelas) || 0;
     const pagas = (p.statusMensal || []).filter(Boolean).length;
-    return a + Math.max(0, qt - pagas) * (parseFloat(p.valorParcela) || 0);
+    return a + Math.max(0, qt - pagas) * minhaParcelaMensal(p);
   }, 0);
 
   function abrirNova() { setEditItem(null); setShowForm(true); }
@@ -1005,8 +1020,9 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
               <div style={{fontSize:12,color:C.textLight,marginTop:2}}>{p.cartao||"—"} · {qt}x</div>
             </div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:15,fontWeight:800,color:C.purple,fontFamily:"'DM Mono',monospace"}}>R$ {valorParcela.toFixed(2)}<span style={{fontSize:10,fontWeight:500,color:C.textLight}}>/mês</span></div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>Total: R$ {(parseFloat(p.valorTotal)||0).toFixed(2)}</div>
+              <div style={{fontSize:15,fontWeight:800,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(valorParcela,2)}<span style={{fontSize:10,fontWeight:500,color:C.textLight}}>/mês</span></div>
+              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>Total: {fmtBRL(parseFloat(p.valorTotal)||0)}</div>
+              {p.minhaParte>0&&<div style={{fontSize:11,color:C.purple,fontFamily:"'DM Mono',monospace",fontWeight:600}}>Minha parte: {fmtBRL(p.minhaParte)}</div>}
             </div>
           </div>
           {/* Barra de progresso */}
@@ -1040,7 +1056,7 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
           </div>
           {restante > 0 && (
             <div style={{background:C.warningLight,border:`1px solid ${C.warning}33`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.warning,fontWeight:600,marginBottom:12}}>
-              ⏳ {restante} parcela(s) restante(s) · R$ {(restante*valorParcela).toFixed(2)}
+              ⏳ {restante} parcela(s) restante(s) · {fmtBRL((restante*valorParcela),2)}
             </div>
           )}
           {restante === 0 && qt > 0 && (
@@ -1070,13 +1086,22 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
     }
   }, [f.valorTotal, f.quantidadeParcelas]);
 
+  // Auto-calcular minhaParte quando mudam valorTotal ou nPessoas
+  useEffect(() => {
+    const vt = parseFloat(f.valorTotal) || 0;
+    const np = parseInt(f.nPessoas) || 0;
+    if (vt > 0 && np > 1) {
+      setF(p => ({ ...p, minhaParte: parseFloat((vt / np).toFixed(2)) }));
+    }
+  }, [f.valorTotal, f.nPessoas]);
+
   function salvar() {
     if (!f.descricao.trim()) return alert("Informe a descrição");
     if (!(parseInt(f.quantidadeParcelas) > 0)) return alert("Informe a quantidade de parcelas");
     const qt = parseInt(f.quantidadeParcelas);
     // Garantir que statusMensal tem o tamanho certo
     const sm = Array.from({length:qt}, (_, i) => (f.statusMensal||[])[i] || false);
-    onSalvar({ ...f, quantidadeParcelas: qt, valorTotal: parseFloat(f.valorTotal)||0, valorParcela: parseFloat(f.valorParcela)||0, statusMensal: sm });
+    onSalvar({ ...f, quantidadeParcelas: qt, valorTotal: parseFloat(f.valorTotal)||0, valorParcela: parseFloat(f.valorParcela)||0, nPessoas: parseInt(f.nPessoas)||0, minhaParte: parseFloat(f.minhaParte)||0, statusMensal: sm });
   }
 
   return (
@@ -1096,9 +1121,21 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       <label style={S.label}>Cartão / Forma de Pagamento</label>
       <input style={S.input} placeholder="Ex: Nubank, Itaú, C6..." value={f.cartao||""} onChange={e => setF(p => ({...p, cartao: e.target.value}))}/>
 
+      <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:8,marginTop:4}}>👥 Divisão (opcional)</div>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <div style={{flex:1}}>
+          <label style={S.label}>Dividido entre (pessoas)</label>
+          <input style={S.input} type="number" min="2" step="1" placeholder="Ex: 2" value={f.nPessoas||""} onChange={e => setF(p => ({...p, nPessoas: e.target.value}))}/>
+        </div>
+        <div style={{flex:1}}>
+          <label style={S.label}>Minha parte (R$)</label>
+          <input style={S.input} type="number" step="0.01" placeholder="Calculado auto." value={f.minhaParte||""} onChange={e => setF(p => ({...p, minhaParte: e.target.value}))}/>
+        </div>
+      </div>
+
       {f.quantidadeParcelas > 0 && parseFloat(f.valorParcela) > 0 && (
         <div style={{background:C.purpleLight,border:`1px solid ${C.purple}33`,borderRadius:10,padding:"10px 14px",marginBottom:14,fontSize:13,color:C.purple,fontWeight:600}}>
-          💳 {f.quantidadeParcelas}x de R$ {parseFloat(f.valorParcela).toFixed(2)} = R$ {(f.quantidadeParcelas*parseFloat(f.valorParcela)).toFixed(2)}
+          💳 {f.quantidadeParcelas}x de {fmtBRL(parseFloat(f.valorParcela),2)} = {fmtBRL((f.quantidadeParcelas*parseFloat(f.valorParcela)),2)}
         </div>
       )}
 
@@ -1162,7 +1199,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
             <div style={{fontWeight:600,fontSize:14,color:p.status==="comprado"?C.textLight:C.text,textDecoration:p.status==="comprado"?"line-through":"none",lineHeight:1.3,flex:1}}>{p.nome}</div>
             <div style={{textAlign:"right",flexShrink:0}}>
               <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${p.usd}</div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>R${brl.toFixed(0)}</div>
+              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,0)}</div>
             </div>
           </div>
           <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
@@ -1175,7 +1212,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
       </div>
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[{label:"BRL previsto",value:`R$ ${brl.toFixed(2)}`},...(brlPago?[{label:"BRL pago",value:`R$ ${brlPago.toFixed(2)}`,color:C.success},{label:"Diferença",value:`R$ ${(brl-brlPago).toFixed(2)}`,color:brl>brlPago?C.success:C.danger}]:[]),{label:"USD c/ taxa",value:`US$ ${calcUsdFinal(p.usd,settings).toFixed(2)}`,color:C.textMid}].map(({label,value,color})=>(
+          {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(p.usd,settings),2)}`,color:C.textMid}].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
               <span style={{fontSize:13,color:C.textMid}}>{label}</span>
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
@@ -1218,7 +1255,7 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
             <div style={{padding:"10px 12px"}}>
               <div style={{fontSize:12,fontWeight:600,color:C.text,lineHeight:1.3,marginBottom:5,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{p.nome}</div>
               <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${p.usd}</div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>R${calcBRL(p.usd,settings).toFixed(0)}</div>
+              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(calcBRL(p.usd,settings),0)}</div>
             </div>
           </div>
         ))}
@@ -1302,7 +1339,7 @@ function StatsTab({produtos,gastos,settings}) {
         <>
           {/* Resumo compras */}
           <div style={{display:"flex",gap:8,marginBottom:12}}>
-            {[{label:"Total USD",value:`US$ ${totalUSDCompras.toFixed(0)}`,color:C.primary},{label:"Comprados",value:`${produtos.filter(p=>p.status==="comprado").length}/${produtos.length}`,color:C.success}].map(({label,value,color})=>(
+            {[{label:"Total USD",value:`${fmtUSD(totalUSDCompras,0)}`,color:C.primary},{label:"Comprados",value:`${produtos.filter(p=>p.status==="comprado").length}/${produtos.length}`,color:C.success}].map(({label,value,color})=>(
               <div key={label} style={{...S.card,flex:1,textAlign:"center",padding:"12px 8px",marginBottom:0}}>
                 <div style={{fontSize:16,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{value}</div>
                 <div style={{fontSize:11,color:C.textLight,marginTop:2}}>{label}</div>
@@ -1324,8 +1361,8 @@ function StatsTab({produtos,gastos,settings}) {
                       <span style={{fontSize:13,fontWeight:600,color:C.text}}>{loja}</span>
                     </div>
                     <div style={{textAlign:"right"}}>
-                      <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>US$ {d.usd.toFixed(0)}</span>
-                      <span style={{fontSize:11,color:C.textLight,marginLeft:6}}>{pct.toFixed(0)}%</span>
+                      <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(d.usd,0)}</span>
+                      <span style={{fontSize:11,color:C.textLight,marginLeft:6}}>{fmtN(pct,0)}%</span>
                     </div>
                   </div>
                   <div style={{height:6,background:C.borderLight,borderRadius:999,overflow:"hidden",marginBottom:4}}>
@@ -1348,7 +1385,7 @@ function StatsTab({produtos,gastos,settings}) {
               <div key={loja} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,padding:"9px 0",borderTop:`1px solid ${C.borderLight}`}}>
                 <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loja}</div>
                 <div style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{d.total}</div>
-                <div style={{fontSize:12,color:C.primary,fontFamily:"'DM Mono',monospace",fontWeight:700}}>US${d.usd.toFixed(0)}</div>
+                <div style={{fontSize:12,color:C.primary,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmtUSD(d.usd,0)}</div>
                 <div style={{fontSize:12,color:d.total&&d.comprados/d.total>=1?C.success:C.textMid,fontFamily:"'DM Mono',monospace"}}>{d.total?Math.round(d.comprados/d.total*100):0}%</div>
               </div>
             ))}
@@ -1362,15 +1399,15 @@ function StatsTab({produtos,gastos,settings}) {
           {/* Resumo gastos */}
           <div style={S.heroCard}>
             <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:4}}>Total de gastos (bruto)</div>
-            <div style={{fontSize:28,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace",letterSpacing:"-0.5px"}}>US$ {totalGastosUSD.toFixed(2)}</div>
+            <div style={{fontSize:28,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace",letterSpacing:"-0.5px"}}>{fmtUSD(totalGastosUSD,2)}</div>
             <div style={{display:"flex",gap:8,marginTop:12}}>
               <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 12px",flex:1,textAlign:"center"}}>
                 <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Minha parte</div>
-                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>US$ {totalMeuUSD.toFixed(2)}</div>
+                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalMeuUSD,2)}</div>
               </div>
               <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 12px",flex:1,textAlign:"center"}}>
                 <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>A receber</div>
-                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>US$ {totalAReceberUSD.toFixed(2)}</div>
+                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalAReceberUSD,2)}</div>
               </div>
               <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 12px",flex:1,textAlign:"center"}}>
                 <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Itens</div>
@@ -1394,8 +1431,8 @@ function StatsTab({produtos,gastos,settings}) {
                         <span style={{fontSize:13,fontWeight:600,color:C.text}}>{cat}</span>
                       </div>
                       <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>US$ {d.usd.toFixed(2)}</div>
-                        <div style={{fontSize:11,color:C.textLight}}>meu: US$ {d.minhaUSD.toFixed(2)} · {pct.toFixed(0)}%</div>
+                        <div style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(d.usd,2)}</div>
+                        <div style={{fontSize:11,color:C.textLight}}>meu: {fmtUSD(d.minhaUSD,2)} · {fmtN(pct,0)}%</div>
                       </div>
                     </div>
                     <div style={{height:6,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
@@ -1422,10 +1459,10 @@ function StatsTab({produtos,gastos,settings}) {
                     </div>
                   </div>
                   <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US$ {d.totalUSD.toFixed(2)}</div>
+                    <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(d.totalUSD,2)}</div>
                     <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginTop:3}}>
-                      {d.pago>0&&<span style={{fontSize:11,color:C.success,fontWeight:600}}>✓ US${d.pago.toFixed(2)}</span>}
-                      {d.pendente>0&&<span style={{fontSize:11,color:C.danger,fontWeight:600}}>⏳ US${d.pendente.toFixed(2)}</span>}
+                      {d.pago>0&&<span style={{fontSize:11,color:C.success,fontWeight:600}}>✓ {fmtUSD(d.pago,2)}</span>}
+                      {d.pendente>0&&<span style={{fontSize:11,color:C.danger,fontWeight:600}}>⏳ {fmtUSD(d.pendente,2)}</span>}
                     </div>
                   </div>
                 </div>
@@ -1434,7 +1471,7 @@ function StatsTab({produtos,gastos,settings}) {
               {totalAReceberUSD>0&&(
                 <div style={{marginTop:12,background:C.warningLight,border:`1px solid ${C.warning}33`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                   <span style={{fontSize:13,fontWeight:600,color:C.warning}}>⏳ Total a receber</span>
-                  <span style={{fontSize:15,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>US$ {totalAReceberUSD.toFixed(2)}</span>
+                  <span style={{fontSize:15,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalAReceberUSD,2)}</span>
                 </div>
               )}
             </div>
@@ -1457,8 +1494,8 @@ function StatsTab({produtos,gastos,settings}) {
                     <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.descricao}</div>
                     <div style={{fontSize:10,color:C.textLight}}>{g.loja||g.categoria}</div>
                   </div>
-                  <div style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>US${usd.toFixed(2)}</div>
-                  <div style={{fontSize:12,color:C.primary,fontFamily:"'DM Mono',monospace",fontWeight:700}}>US${minha.toFixed(2)}</div>
+                  <div style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usd,2)}</div>
+                  <div style={{fontSize:12,color:C.primary,fontFamily:"'DM Mono',monospace",fontWeight:700}}>{fmtUSD(minha,2)}</div>
                   <div style={{fontSize:11,color:C.textMid}}>{nP>1?`÷${nP}p`:"-"}</div>
                 </div>
               );
@@ -1466,8 +1503,8 @@ function StatsTab({produtos,gastos,settings}) {
             {gastos.length>0&&(
               <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,padding:"10px 0",borderTop:`2px solid ${C.border}`,marginTop:4}}>
                 <div style={{fontSize:12,fontWeight:700,color:C.text}}>Total</div>
-                <div style={{fontSize:12,fontWeight:700,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>US${totalGastosUSD.toFixed(2)}</div>
-                <div style={{fontSize:12,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${totalMeuUSD.toFixed(2)}</div>
+                <div style={{fontSize:12,fontWeight:700,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalGastosUSD,2)}</div>
+                <div style={{fontSize:12,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalMeuUSD,2)}</div>
                 <div/>
               </div>
             )}
@@ -1499,7 +1536,7 @@ function BcbRate() {
           {rate&&<div style={{fontSize:11,color:C.textLight}}>atualizado às {lastFetch}</div>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>R$ {rate.toFixed(4)}</span>}
+          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>}
           <button onClick={fetch_} style={{background:C.primaryLight,border:`1px solid ${C.primary}33`,borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:600,color:C.primary,cursor:"pointer"}}>
             {loading?"...":"↻ BCB"}
           </button>
@@ -1521,7 +1558,7 @@ function CalcTab({settings}) {
       <div style={S.card}>
         <label style={S.label}>Valor em USD</label>
         <input style={S.input} type="number" placeholder="Ex: 199" value={usd} onChange={e=>setUsd(e.target.value)}/>
-        {usdN>0&&[{label:"USD c/ taxa",value:`US$ ${usdF.toFixed(2)}`,color:C.textMid},{label:"Dólar ajustado",value:`R$ ${dolarAj.toFixed(4)}`,color:C.textMid},{label:"Valor em BRL",value:`R$ ${brlP.toFixed(2)}`,color:C.primary}].map(({label,value,color})=>(
+        {usdN>0&&[{label:"USD c/ taxa",value:`${fmtUSD(usdF,2)}`,color:C.textMid},{label:"Dólar ajustado",value:`${fmtBRL(dolarAj,4)}`,color:C.textMid},{label:"Valor em BRL",value:`${fmtBRL(brlP,2)}`,color:C.primary}].map(({label,value,color})=>(
           <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
             <span style={{fontSize:13,color:C.textMid}}>{label}</span>
             <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
@@ -1530,7 +1567,7 @@ function CalcTab({settings}) {
         <div style={{height:14}}/>
         <label style={S.label}>Dólar que você pagou (opcional)</label>
         <input style={S.input} type="number" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
-        {brlC&&usdN>0&&[{label:"Com seu dólar",value:`R$ ${brlC.toFixed(2)}`,color:C.success},{label:"Diferença",value:`R$ ${(brlP-brlC).toFixed(2)}`,color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
+        {brlC&&usdN>0&&[{label:"Com seu dólar",value:`${fmtBRL(brlC,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brlP-brlC),2)}`,color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
           <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
             <span style={{fontSize:13,color:C.textMid}}>{label}</span>
             <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
@@ -1553,7 +1590,7 @@ function CalcTab({settings}) {
       </div>
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
-        {[["Dólar pago",`R$ ${settings.dollarPago.toFixed(4)}`],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",`R$ ${dolarAj.toFixed(4)}`]].map(([l,v])=>(
+        {[["Dólar pago",`${fmtBRL(settings.dollarPago,4)}`],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",`${fmtBRL(dolarAj,4)}`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
         <BcbRate/>
