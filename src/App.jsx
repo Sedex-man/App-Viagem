@@ -40,7 +40,7 @@ const C = {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const INITIAL_SETTINGS = { dollarPago:5.62, iof:3.38, spread:0.99, taxa:6.5, pesoMax:23000, totalDolarViagem:3000 };
-const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","GameStop","Apple","Restaurante","Uber","Passeio","Outro"];
+const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","Game Stop","Apple","Restaurante","Uber","Passeio","Outro"];
 const PRIORIDADES = ["Alta","Média","Baixa"];
 const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
 
@@ -292,7 +292,7 @@ function LoginScreen() {
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{width:"100%",maxWidth:390,background:C.bgCard,borderRadius:24,padding:26,boxShadow:"0 24px 70px rgba(15,23,42,0.25)",border:"1px solid rgba(255,255,255,0.35)"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}>
-          <div style={{width:48,height:48,borderRadius:16,background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:25,color:"white"}}>✈</div>
+          <img src="/image_a375cf.png" alt="TravelShop" style={{width:48,height:48,borderRadius:16,objectFit:"cover"}}/>
           <div>
             <div style={{fontSize:24,fontWeight:850,color:C.text,letterSpacing:"-0.7px"}}>TravelShop</div>
             <div style={{fontSize:13,color:C.textMid}}>Entre para sincronizar PC e celular</div>
@@ -520,7 +520,7 @@ export default function App() {
   const pesoColor=pesoPercent<70?C.success:pesoPercent<90?C.warning:C.danger;
   const pesoBg=pesoPercent<70?C.successLight:pesoPercent<90?C.warningLight:C.dangerLight;
 
-  const TABS=["Início","Produtos","Galeria","Gastos","Parcelas","Roteiro","Stats","Calc"];
+  const TABS=["Início","Produtos","Galeria","Gastos","Parcelas","Roteiro","Stats","Dólar","Calc"];
 
 
   if (!authReady) {
@@ -539,7 +539,7 @@ export default function App() {
       {notification&&<div className={`notif notif-${notification.type}`}>{notification.msg}</div>}
       <div style={S.header}>
         <div style={S.headerLeft}>
-          <div style={S.logoBox}>✈</div>
+          <img src="/image_a375cf.png" alt="TravelShop" style={{width:36,height:36,borderRadius:10,objectFit:"cover"}}/>
           <div>
             <div style={S.headerTitle}>TravelShop</div>
             <div style={S.headerSub}>Orlando 2027</div>
@@ -554,14 +554,15 @@ export default function App() {
       </div>
 
       <div style={S.content}>
-        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg}/>}
+        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} onCalcSubTab={setCalcSubTab}/>}
         {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab}/>}
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
         {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
-        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings}/>}
-        {tab===7&&<CalcTab settings={settings} gastos={gastos} produtos={produtos} parcelas={parcelas} comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} checklist={checklist} setChecklist={setChecklist}/>}
+        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist}/>}
+        {tab===7&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
+        {tab===8&&<CalcTab settings={settings} gastos={gastos} produtos={produtos} parcelas={parcelas} comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} checklist={checklist} setChecklist={setChecklist} initialSubTab={calcSubTab} onSubTabChange={setCalcSubTab}/>}
       </div>
 
       <nav style={S.nav}>
@@ -584,8 +585,89 @@ export default function App() {
   );
 }
 
+
+// ─── COTAÇÃO BCB CARD (Dashboard) ────────────────────────────────────────────
+function CotacaoBcbCard({settings}) {
+  const [rate, setRate] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [lastFetch, setLastFetch] = useState(null);
+  const [variacao, setVariacao] = useState(null);
+
+  async function buscarCotacao() {
+    setLoading(true);
+    try {
+      const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", {signal:AbortSignal.timeout(6000)});
+      const data = await res.json();
+      const bid = parseFloat(data?.USDBRL?.bid);
+      const pct = parseFloat(data?.USDBRL?.pctChange);
+      if (!isNaN(bid)) {
+        setRate(bid);
+        setVariacao(pct);
+        setLastFetch(new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"}));
+      }
+    } catch {}
+    setLoading(false);
+  }
+
+  useEffect(() => { buscarCotacao(); }, []);
+
+  const comIOF = rate ? rate * (1 + (settings.iof + settings.spread) / 100) : null;
+  const varPos = variacao >= 0;
+
+  return (
+    <div style={{...S.card,marginBottom:10,background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:`1px solid ${C.success}33`,padding:"12px 14px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div>
+          <div style={{fontSize:11,fontWeight:700,color:C.success,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:4}}>💱 Dólar hoje (BCB)</div>
+          {loading && <div style={{fontSize:13,color:C.textLight}}>Buscando...</div>}
+          {!loading && rate && (
+            <>
+              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>
+                {variacao !== null && (
+                  <span style={{fontSize:12,fontWeight:700,color:varPos?C.danger:C.success}}>
+                    {varPos?"▲":"▼"} {Math.abs(variacao).toFixed(2)}%
+                  </span>
+                )}
+              </div>
+              <div style={{fontSize:11,color:C.textLight,marginTop:1}}>mercado às {lastFetch}</div>
+            </>
+          )}
+          {!loading && !rate && <div style={{fontSize:12,color:C.textLight}}>Toque para buscar</div>}
+        </div>
+        <div style={{textAlign:"right"}}>
+          {comIOF && (
+            <div>
+              <div style={{fontSize:11,color:C.textMid,marginBottom:2}}>c/ IOF + spread</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(comIOF,4)}</div>
+              <div style={{fontSize:10,color:C.textLight}}>{settings.iof}% IOF + {settings.spread}% spread</div>
+            </div>
+          )}
+          <button onClick={buscarCotacao} style={{background:C.successLight,border:`1px solid ${C.success}44`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,color:C.success,cursor:"pointer",marginTop:6}}>
+            {loading?"...":"↻ Atualizar"}
+          </button>
+        </div>
+      </div>
+      {rate && (
+        <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.success}22`,display:"flex",gap:10}}>
+          {[
+            {label:"Mercado",val:fmtBRL(rate,4),color:C.text},
+            {label:"c/ IOF+spread",val:fmtBRL(comIOF,4),color:C.warning},
+            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,4),color:rate<=settings.dollarPago?C.danger:C.success},
+          ].map(({label,val,color})=>(
+            <div key={label} style={{flex:1,textAlign:"center",background:"rgba(255,255,255,0.6)",borderRadius:8,padding:"6px 4px"}}>
+              <div style={{fontSize:9,color:C.textLight,marginBottom:2,fontWeight:600,textTransform:"uppercase"}}>{label}</div>
+              <div style={{fontSize:12,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{val}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
+function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,onCalcSubTab}) {
   const dolarAj=calcDolarAjustado(settings);
   const pct=stats.total?Math.round(stats.comprados/stats.total*100):0;
   const usdRestante=settings.totalDolarViagem - stats.valorTotalUSD;
@@ -602,6 +684,9 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
           ))}
         </div>
       </div>
+
+      {/* Cotação BCB */}
+      <CotacaoBcbCard settings={settings}/>
 
       {/* Dólar levando */}
       <div style={{...S.card,background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:`1px solid ${C.success}33`}}>
@@ -641,7 +726,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
       </div>
 
       {/* Progresso + peso */}
-      <div style={{...S.card,display:"flex",alignItems:"center",gap:20}}>
+      <div style={{...S.card,display:"flex",alignItems:"center",gap:20,cursor:"pointer"}} onClick={()=>{onCalcSubTab&&onCalcSubTab("bagagem");onTabChange&&onTabChange(8);}}>
         <div style={{position:"relative",width:70,height:70,flexShrink:0}}>
           <svg width="70" height="70" viewBox="0 0 70 70">
             <circle cx="35" cy="35" r="27" fill="none" stroke={C.borderLight} strokeWidth="7"/>
@@ -661,6 +746,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
           <div style={{height:5,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
             <div style={{width:`${pesoPercent}%`,height:"100%",background:pesoColor,borderRadius:999}}/>
           </div>
+          <div style={{fontSize:10,color:C.textLight,marginTop:5,fontWeight:500}}>Toque para ver detalhes →</div>
         </div>
       </div>
 
@@ -983,6 +1069,13 @@ function NavIcon({ name, active }) {
         {active && <rect x="16" y="10" width="4" height="10" rx="1" fill={col+"33"}/>}
       </svg>
     ),
+    "Dólar": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <path d="M12 6v1m0 10v1M9.5 9.5C9.5 8.12 10.62 7 12 7s2.5 1.12 2.5 2.5c0 1.5-1.5 2-2.5 2.5-1 .5-2.5 1-2.5 2.5C9.5 15.88 10.62 17 12 17s2.5-1.12 2.5-2.5" stroke={col} strokeWidth="1.8" strokeLinecap="round"/>
+        <path d="M4 7l2 2M18 15l2 2M4 17l2-2M18 7l2-2" stroke={col} strokeWidth="1.4" strokeLinecap="round" opacity="0.5"/>
+      </svg>
+    ),
     "Calc": (
       <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
         <rect x="4" y="2" width="16" height="20" rx="3" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
@@ -1198,27 +1291,28 @@ function EventoForm({evento,onSalvar,onClose}) {
 }
 
 // ─── CALC TAB (extendida: Simulador + Histórico Dólar + Checklist + Bagagem) ──
-function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setComprasDolar, checklist, setChecklist}) {
-  const [subTab, setSubTab] = useState("conversor");
+function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setComprasDolar, checklist, setChecklist, initialSubTab, onSubTabChange}) {
+  const [subTab, setSubTab] = useState(initialSubTab||"conversor");
+  function changeSubTab(v){setSubTab(v);onSubTabChange&&onSubTabChange(v);}
   const SUBTABS = [
     {id:"conversor",label:"💱 Câmbio"},
     {id:"simulador",label:"💰 Simulador"},
     {id:"dolar",label:"📈 Meu Dólar"},
     {id:"bagagem",label:"⚖ Bagagem"},
-    {id:"checklist",label:"✅ Checklist"},
+
   ];
   return (
     <div style={S.page}>
       <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:4,marginBottom:14}}>
         {SUBTABS.map(t=>(
-          <button key={t.id} onClick={()=>setSubTab(t.id)} style={{...S.chip,...(subTab===t.id?S.chipActive:{}),whiteSpace:"nowrap",flexShrink:0,fontSize:12,padding:"6px 12px"}}>{t.label}</button>
+          <button key={t.id} onClick={()=>changeSubTab(t.id)} style={{...S.chip,...(subTab===t.id?S.chipActive:{}),whiteSpace:"nowrap",flexShrink:0,fontSize:12,padding:"6px 12px"}}>{t.label}</button>
         ))}
       </div>
       {subTab==="conversor"&&<ConversorTab settings={settings}/>}
       {subTab==="simulador"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas}/>}
       {subTab==="dolar"&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
       {subTab==="bagagem"&&<BagagemTab produtos={produtos} settings={settings}/>}
-      {subTab==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
+
     </div>
   );
 }
@@ -1486,6 +1580,9 @@ const CHECKLIST_DEFAULTS = [
 
 function ChecklistTab({checklist, setChecklist}) {
   const [initialized, setInitialized] = useState(false);
+  const [novoTexto, setNovoTexto] = useState("");
+  const [novaCat, setNovaCat] = useState("");
+  const [showAdd, setShowAdd] = useState(false);
 
   useEffect(()=>{
     if(checklist.length===0 && !initialized) {
@@ -1497,6 +1594,13 @@ function ChecklistTab({checklist, setChecklist}) {
 
   function toggle(id) { setChecklist(ps=>ps.map(p=>p.id===id?{...p,feito:!p.feito}:p)); }
   function remover(id) { setChecklist(ps=>ps.filter(p=>p.id!==id)); }
+  function adicionar() {
+    if(!novoTexto.trim()) return;
+    const cats = [...new Set(checklist.map(p=>p.cat))];
+    const cat = novaCat.trim() || (cats[0] || "📋 Geral");
+    setChecklist(ps=>[...ps,{id:Date.now(),texto:novoTexto.trim(),cat,feito:false}]);
+    setNovoTexto(""); setShowAdd(false);
+  }
 
   const cats = [...new Set(checklist.map(p=>p.cat))];
   const feitos = checklist.filter(p=>p.feito).length;
@@ -1513,6 +1617,21 @@ function ChecklistTab({checklist, setChecklist}) {
         {pct===100&&<div style={{marginTop:8,fontSize:14,fontWeight:700,color:"#fff"}}>✅ Tudo pronto para a viagem!</div>}
       </div>
 
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button style={{...S.btnPrimary,padding:"9px 14px",fontSize:13,marginBottom:0}} onClick={()=>setShowAdd(s=>!s)}>
+          {showAdd?"Cancelar":"＋ Novo item"}
+        </button>
+      </div>
+      {showAdd&&(
+        <div style={{...S.card,marginBottom:14}}>
+          <label style={S.label}>Item *</label>
+          <input style={S.input} placeholder="Ex: Renovar passaporte" value={novoTexto} onChange={e=>setNovoTexto(e.target.value)} onKeyDown={e=>e.key==="Enter"&&adicionar()}/>
+          <label style={S.label}>Categoria</label>
+          <input style={S.input} list="cats-list" placeholder="Selecione ou crie uma categoria" value={novaCat} onChange={e=>setNovaCat(e.target.value)}/>
+          <datalist id="cats-list">{cats.map(c=><option key={c} value={c}/>)}</datalist>
+          <button style={S.btnPrimary} onClick={adicionar}>Adicionar</button>
+        </div>
+      )}
       {cats.map(cat=>{
         const itens = checklist.filter(p=>p.cat===cat);
         const feitosCat = itens.filter(p=>p.feito).length;
@@ -2043,7 +2162,7 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
 }
 
 // ─── STATS TAB ────────────────────────────────────────────────────────────────
-function StatsTab({produtos,gastos,settings}) {
+function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
   const [secao,setSecao]=useState("compras");
   const barColors=[C.primary,C.purple,C.success,C.warning,C.danger,"#06B6D4","#F97316","#EC4899"];
 
@@ -2106,7 +2225,7 @@ function StatsTab({produtos,gastos,settings}) {
     <div style={S.page}>
       {/* Sub-tabs */}
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:14}}>
-        {[["compras","🛒 Compras"],["gastos","💸 Gastos"]].map(([v,l])=>(
+        {[["compras","🛒 Compras"],["gastos","💸 Gastos"],["checklist","✅ Checklist"]].map(([v,l])=>(
           <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:secao===v?C.bgCard:"transparent",color:secao===v?C.primary:C.textMid,boxShadow:secao===v?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.2s"}} onClick={()=>setSecao(v)}>{l}</button>
         ))}
       </div>
@@ -2169,6 +2288,9 @@ function StatsTab({produtos,gastos,settings}) {
           </div>
         </>
       )}
+
+      {/* ── CHECKLIST ── */}
+      {secao==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
 
       {/* ── GASTOS ── */}
       {secao==="gastos"&&(
