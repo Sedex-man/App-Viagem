@@ -40,8 +40,32 @@ const C = {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const INITIAL_SETTINGS = { dollarPago:5.62, iof:3.38, spread:0.99, taxa:6.5, pesoMax:23000, totalDolarViagem:3000 };
-const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","GameStop","Apple","Restaurante","Uber","Passeio","Outro"];
-const PRIORIDADES = ["Alta","Média","Baixa"];
+const LOJAS_SUGESTOES = [
+  // --- Lista Original ---
+  "Walmart", "Basspro", "Target", "HomeGoods", "Dollar Tree", "Amazon", 
+  "Marshalls", "Ross", "TJ Maxx", "Tommy Hilfiger", "Calvin Klein", 
+  "The North Face", "Sephora", "Ulta", "Best Buy", "Costco", "GameStop", 
+  "Apple", "Restaurante", "Uber", "Passeio", "Outro",
+
+  // --- Novas Sugestões Adicionadas ---
+  // Lojas de Departamento, Variedades e Descontos
+  "Macy's", "Nordstrom", "Burlington", "Five Below", "Sam's Club",
+  
+  // Vestuário, Moda e Esportes
+  "Nike", "Adidas", "Under Armour", "Zara", "H&M", "Levi's", "Gap", "Cabela's",
+  
+  // Beleza e Cuidados Pessoais
+  "Bath & Body Works", "CVS", "Walgreens",
+  
+  // Eletrônicos e Entretenimento
+  "Micro Center", "Barnes & Noble",
+  
+  // Casa, Decoração e Ferramentas
+  "Home Depot", "Lowe's", "Bed Bath & Beyond", "IKEA",
+  
+  // Serviços e Transporte (Para acompanhar Uber/Passeio)
+  "Lyft", "Gas Station", "Supermarket", "Hotel"
+];const PRIORIDADES = ["Alta","Média","Baixa"];
 const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
 
 // ─── CALC ─────────────────────────────────────────────────────────────────────
@@ -558,7 +582,7 @@ export default function App() {
         {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} onCalcSubTab={setCalcSubTab}/>}
         {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab}/>}
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
-        {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus}/>}
+        {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
         {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
         {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist}/>}
@@ -767,8 +791,9 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,o
 }
 
 // ─── GASTOS TAB ───────────────────────────────────────────────────────────────
-function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,onToggleStatus}) {
+function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,onToggleStatus,parcelas}) {
   const [filtro,setFiltro]=useState("todos");
+  const [subTab,setSubTab]=useState("gastos");
 
   const totalUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g),0);
   const aReceberUSD=gastos.reduce((a,g)=>{
@@ -784,6 +809,14 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
 
   return (
     <div style={S.page}>
+      {/* Sub-abas */}
+      <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
+        {[["gastos","💸 Gastos"],["totais","📊 Gastos totais"]].map(([v,l])=>(
+          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
+        ))}
+      </div>
+      {subTab==="totais"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]}/>}
+      {subTab==="gastos"&&<>
       {/* Resumo topo */}
       <div style={S.heroCard}>
         <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:4}}>Meus gastos totais</div>
@@ -811,6 +844,7 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
       {filtrados.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente."/>}
 
       {filtrados.map(g=><GastoCard key={g.id} g={g} settings={settings} onEdit={()=>onEdit(g)} onDelete={()=>onDelete(g.id)} onTogglePago={onTogglePago} produtos={produtos}/>)}
+      </>}
     </div>
   );
 }
@@ -1297,7 +1331,7 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
   function changeSubTab(v){setSubTab(v);onSubTabChange&&onSubTabChange(v);}
   const SUBTABS = [
     {id:"conversor",label:"💱 Câmbio"},
-    {id:"simulador",label:"💰 Simulador"},
+
     {id:"dolar",label:"📈 Meu Dólar"},
     {id:"bagagem",label:"⚖ Bagagem"},
 
@@ -1310,7 +1344,6 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
         ))}
       </div>
       {subTab==="conversor"&&<ConversorTab settings={settings}/>}
-      {subTab==="simulador"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas}/>}
       {subTab==="dolar"&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
       {subTab==="bagagem"&&<BagagemTab produtos={produtos} settings={settings}/>}
 
