@@ -579,7 +579,7 @@ export default function App() {
       </div>
 
       <div style={S.content}>
-        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} onCalcSubTab={setCalcSubTab}/>}
+        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab}/>}
         {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab}/>}
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
@@ -588,6 +588,7 @@ export default function App() {
         {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist}/>}
         {tab===7&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
         {tab===8&&<CalcTab settings={settings} gastos={gastos} produtos={produtos} parcelas={parcelas} comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} checklist={checklist} setChecklist={setChecklist} initialSubTab={calcSubTab} onSubTabChange={setCalcSubTab}/>}
+        {tab===9&&<div style={S.page}><button onClick={()=>setTab(0)} style={{...S.btnOutline,marginBottom:14,display:"flex",alignItems:"center",gap:6}}><span>←</span> Voltar</button><BagagemTab produtos={produtos} settings={settings}/></div>}
       </div>
 
       <nav style={S.nav}>
@@ -692,7 +693,7 @@ function CotacaoBcbCard({settings}) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,onCalcSubTab}) {
+function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange}) {
   const dolarAj=calcDolarAjustado(settings);
   const pct=stats.total?Math.round(stats.comprados/stats.total*100):0;
   const usdRestante=settings.totalDolarViagem - stats.valorTotalUSD;
@@ -751,7 +752,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,o
       </div>
 
       {/* Progresso + peso */}
-      <div style={{...S.card,display:"flex",alignItems:"center",gap:20,cursor:"pointer"}} onClick={()=>{onCalcSubTab&&onCalcSubTab("bagagem");onTabChange&&onTabChange(8);}}>
+      <div style={{...S.card,display:"flex",alignItems:"center",gap:20,cursor:"pointer"}} onClick={()=>{onTabChange&&onTabChange(9);}}>
         <div style={{position:"relative",width:70,height:70,flexShrink:0}}>
           <svg width="70" height="70" viewBox="0 0 70 70">
             <circle cx="35" cy="35" r="27" fill="none" stroke={C.borderLight} strokeWidth="7"/>
