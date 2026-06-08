@@ -3,17 +3,27 @@ import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import { registerSW } from 'virtual:pwa-register'
 
+// Limpar caches antigos do Service Worker (remove caches de versões anteriores)
+if ('caches' in window) {
+  caches.keys().then(names => {
+    names.forEach(name => {
+      // Remover caches de APIs externas que não devem ser cacheadas
+      if (name.includes('api-cache') || name.includes('cotacao-cache')) {
+        caches.delete(name);
+      }
+    });
+  });
+}
+
 // Registrar Service Worker com auto-reload silencioso
 const updateSW = registerSW({
-  // Quando uma nova versão estiver disponível e instalada, recarregar automaticamente
   onNeedRefresh() {
-    updateSW(true); // força atualização silenciosa
+    updateSW(true);
   },
   onOfflineReady() {
     console.log('[TravelShop] App pronto para uso offline!');
   },
   onRegistered(r) {
-    // Verificar atualizações a cada 60 segundos quando online
     if (r) {
       setInterval(() => {
         if (navigator.onLine) r.update();
