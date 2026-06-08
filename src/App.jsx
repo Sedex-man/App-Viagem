@@ -211,7 +211,17 @@ function parseParcelasSheet(wb, sheetName) {
         ? r[iValT].toString().replace(/[R$\s.]/g, "").replace(",", ".")
         : 0
     ) || 0;
-    const cartao = r[iFatura] ? r[iFatura].toString().trim() : "";
+    const cartaoRaw = r[iFatura] ? r[iFatura].toString().trim() : "";
+    // "Primeira Fatura" na planilha é o mês inicial (ex: "abr/26") — salvar como primeiraFatura
+    // Normalizar para formato "mmm/aa" em minúsculas
+    let primeiraFatura = "";
+    const pfMatch = cartaoRaw.match(/([a-záàãâéêíóôõúç]{3})[\/\-](\d{2,4})/i);
+    if (pfMatch) {
+      const mn = pfMatch[1].toLowerCase().substring(0,3);
+      const an = pfMatch[2].slice(-2);
+      primeiraFatura = `${mn}/${an}`;
+    }
+    const cartao = primeiraFatura; // reusa como cartão por enquanto
 
     if (qt <= 0 || !desc.trim()) continue;
 
@@ -222,6 +232,7 @@ function parseParcelasSheet(wb, sheetName) {
       quantidadeParcelas: qt,
       valorParcela,
       cartao,
+      primeiraFatura,
       statusMensal: Array(qt).fill(false),
     });
   }
@@ -897,6 +908,26 @@ function GastoForm({gasto,settings,onSave,onClose}) {
 
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
 const MESES_LABELS = ["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
+const MESES_NOMES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
+const MESES_SELECT = ["jan/25","fev/25","mar/25","abr/25","mai/25","jun/25","jul/25","ago/25","set/25","out/25","nov/25","dez/25","jan/26","fev/26","mar/26","abr/26","mai/26","jun/26","jul/26","ago/26","set/26","out/26","nov/26","dez/26","jan/27","fev/27","mar/27","abr/27","mai/27","jun/27","jul/27","ago/27","set/27","out/27","nov/27","dez/27"];
+
+// Dado "abr/26" e offset 0,1,2... retorna "abr/26","mai/26","jun/26"...
+function addMeses(mesAno, offset) {
+  if (!mesAno) return "";
+  const [m, a] = mesAno.split("/");
+  const mi = MESES_NOMES.indexOf(m.toLowerCase());
+  if (mi < 0) return mesAno;
+  const total = mi + offset;
+  const mes = MESES_NOMES[total % 12];
+  const ano = (parseInt("20" + a) + Math.floor(total / 12)).toString().slice(-2);
+  return `${mes}/${ano}`;
+}
+
+// Comparar dois mesAno: retorna -1,0,1
+function compareMesAno(a, b) {
+  const parse = s => { const [m,y]=s.split("/"); return parseInt("20"+y)*12+MESES_NOMES.indexOf(m); };
+  return parse(a) - parse(b);
+}
 
 function parcelaVazia() {
   return {
@@ -909,6 +940,7 @@ function parcelaVazia() {
     statusMensal: Array(10).fill(false),
     nPessoas: "",       // opcional: dividido entre N pessoas
     minhaParte: "",     // minha parte do valorTotal
+    primeiraFatura: "", // ex: "abr/26"
   };
 }
 
@@ -996,6 +1028,11 @@ function ParcelasTab({ parcelas, setParcelas }) {
         />
       ))}
 
+      {/* Dashboard — Distribuição por Fatura */}
+      {parcelas.some(p => p.primeiraFatura) && (
+        <DistribuicaoFatura parcelas={parcelas} minhaParcelaMensal={minhaParcelaMensal} toggleMes={toggleMes}/>
+      )}
+
       {showForm && (
         <ParcelaForm
           parcela={editItem}
@@ -1003,6 +1040,96 @@ function ParcelasTab({ parcelas, setParcelas }) {
           onClose={() => { setShowForm(false); setEditItem(null); }}
         />
       )}
+    </div>
+  );
+}
+
+// ─── DISTRIBUIÇÃO POR FATURA ──────────────────────────────────────────────────
+function DistribuicaoFatura({ parcelas, minhaParcelaMensal, toggleMes }) {
+  // Coletar todos os meses do range de todas as parcelas
+  const allMeses = new Set();
+  parcelas.forEach(p => {
+    if (!p.primeiraFatura) return;
+    const qt = parseInt(p.quantidadeParcelas) || 0;
+    for (let i = 0; i < qt; i++) allMeses.add(addMeses(p.primeiraFatura, i));
+  });
+
+  // Ordenar cronologicamente
+  const mesesOrdenados = [...allMeses].sort(compareMesAno);
+  if (mesesOrdenados.length === 0) return null;
+
+  // Parcelas que têm primeiraFatura
+  const parcelasComData = parcelas.filter(p => p.primeiraFatura);
+
+  return (
+    <div style={{marginTop:8,marginBottom:16}}>
+      <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:10,paddingTop:4}}>📅 Distribuição por Fatura</div>
+      <div style={{overflowX:"auto",borderRadius:14,border:`1px solid ${C.border}`}}>
+        <table style={{borderCollapse:"collapse",minWidth:"100%",fontSize:12}}>
+          <thead>
+            <tr style={{background:C.bg}}>
+              <th style={{padding:"8px 12px",textAlign:"left",fontWeight:700,color:C.textMid,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",position:"sticky",left:0,background:C.bg,zIndex:1}}>Fatura</th>
+              {parcelasComData.map(p => (
+                <th key={p.id} style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:C.purple,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap",minWidth:90,fontSize:11}}>
+                  {p.descricao.length > 10 ? p.descricao.slice(0,10)+"…" : p.descricao}
+                </th>
+              ))}
+              <th style={{padding:"8px 10px",textAlign:"right",fontWeight:700,color:C.text,borderBottom:`1px solid ${C.border}`,whiteSpace:"nowrap"}}>Total/Fatura</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mesesOrdenados.map((mes, ri) => {
+              let totalFatura = 0;
+              return (
+                <tr key={mes} style={{background:ri%2===0?C.bgCard:"transparent"}}>
+                  <td style={{padding:"7px 12px",fontWeight:600,color:C.text,borderBottom:`1px solid ${C.borderLight}`,whiteSpace:"nowrap",position:"sticky",left:0,background:ri%2===0?C.bgCard:"#fff",zIndex:1}}>{mes}</td>
+                  {parcelasComData.map(p => {
+                    const qt = parseInt(p.quantidadeParcelas) || 0;
+                    const idx = mesesOrdenados.indexOf(mes);
+                    // Qual índice da parcela corresponde a este mês?
+                    const parcelaIdx = (() => {
+                      for (let i = 0; i < qt; i++) {
+                        if (addMeses(p.primeiraFatura, i) === mes) return i;
+                      }
+                      return -1;
+                    })();
+                    if (parcelaIdx < 0) {
+                      return <td key={p.id} style={{padding:"7px 10px",textAlign:"center",color:C.textLight,borderBottom:`1px solid ${C.borderLight}`}}>—</td>;
+                    }
+                    const statusMensal = p.statusMensal || Array(qt).fill(false);
+                    const pago = statusMensal[parcelaIdx] || false;
+                    const val = minhaParcelaMensal(p);
+                    totalFatura += val;
+                    return (
+                      <td key={p.id} style={{padding:"7px 10px",textAlign:"center",borderBottom:`1px solid ${C.borderLight}`}}>
+                        <button
+                          onClick={() => toggleMes(p.id, parcelaIdx)}
+                          style={{background:pago?C.successLight:C.warningLight,color:pago?C.success:C.warning,border:`1px solid ${pago?C.success:C.warning}44`,borderRadius:8,padding:"3px 7px",fontSize:11,fontWeight:700,cursor:"pointer",whiteSpace:"nowrap",fontFamily:"'DM Mono',monospace"}}
+                        >
+                          {pago?"✓ ":""}{fmtBRL(val,2)}
+                        </button>
+                      </td>
+                    );
+                  })}
+                  <td style={{padding:"7px 10px",textAlign:"right",fontWeight:700,color:C.primary,borderBottom:`1px solid ${C.borderLight}`,fontFamily:"'DM Mono',monospace",whiteSpace:"nowrap"}}>{fmtBRL(totalFatura,2)}</td>
+                </tr>
+              );
+            })}
+            {/* Linha de total geral */}
+            <tr style={{background:C.primaryLight}}>
+              <td style={{padding:"8px 12px",fontWeight:700,color:C.primary,position:"sticky",left:0,background:C.primaryLight,zIndex:1}}>Total</td>
+              {parcelasComData.map(p => (
+                <td key={p.id} style={{padding:"8px 10px",textAlign:"center",fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace",fontSize:11}}>
+                  {fmtBRL(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0,2)}
+                </td>
+              ))}
+              <td style={{padding:"8px 10px",textAlign:"right",fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>
+                {fmtBRL(parcelasComData.reduce((a,p)=>a+(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0),0),2)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1024,7 +1151,7 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
             <div>
               <div style={{fontWeight:600,fontSize:14,color:C.text,lineHeight:1.3}}>{p.descricao||"Sem descrição"}</div>
-              <div style={{fontSize:12,color:C.textLight,marginTop:2}}>{p.cartao||"—"} · {qt}x</div>
+              <div style={{fontSize:12,color:C.textLight,marginTop:2}}>{p.cartao||"—"} · {qt}x{p.primeiraFatura?` · desde ${p.primeiraFatura}`:""}</div>
             </div>
             <div style={{textAlign:"right",flexShrink:0}}>
               <div style={{fontSize:15,fontWeight:800,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(valorParcela,2)}<span style={{fontSize:10,fontWeight:500,color:C.textLight}}>/mês</span></div>
@@ -1049,17 +1176,21 @@ function ParcelaCard({ p, onEditar, onExcluir, onToggleMes }) {
         <div style={{marginTop:14,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
           <div style={{fontSize:12,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>Status das parcelas</div>
           <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:12}}>
-            {Array.from({length:qt}).map((_,i) => (
-              <label key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:36,cursor:"pointer"}}>
-                <input
-                  type="checkbox"
-                  checked={statusMensal[i]||false}
-                  onChange={() => onToggleMes(i)}
-                  style={{width:16,height:16,accentColor:C.success,cursor:"pointer"}}
-                />
-                <span style={{fontSize:10,fontWeight:600,color:statusMensal[i]?C.success:C.textLight}}>{MESES_LABELS[i]||`${i+1}ª`}</span>
-              </label>
-            ))}
+            {Array.from({length:qt}).map((_,i) => {
+              const label = p.primeiraFatura ? addMeses(p.primeiraFatura, i) : (MESES_LABELS[i]||`${i+1}ª`);
+              const pago = statusMensal[i]||false;
+              return (
+                <label key={i} style={{display:"flex",flexDirection:"column",alignItems:"center",gap:3,minWidth:44,cursor:"pointer",background:pago?C.successLight:C.borderLight,borderRadius:8,padding:"6px 4px",border:`1px solid ${pago?C.success+"44":C.border}`}}>
+                  <input
+                    type="checkbox"
+                    checked={pago}
+                    onChange={() => onToggleMes(i)}
+                    style={{width:15,height:15,accentColor:C.success,cursor:"pointer"}}
+                  />
+                  <span style={{fontSize:10,fontWeight:700,color:pago?C.success:C.textMid,textAlign:"center",lineHeight:1.2}}>{label}</span>
+                </label>
+              );
+            })}
           </div>
           {restante > 0 && (
             <div style={{background:C.warningLight,border:`1px solid ${C.warning}33`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.warning,fontWeight:600,marginBottom:12}}>
@@ -1108,7 +1239,7 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
     const qt = parseInt(f.quantidadeParcelas);
     // Garantir que statusMensal tem o tamanho certo
     const sm = Array.from({length:qt}, (_, i) => (f.statusMensal||[])[i] || false);
-    onSalvar({ ...f, quantidadeParcelas: qt, valorTotal: parseFloat(f.valorTotal)||0, valorParcela: parseFloat(f.valorParcela)||0, nPessoas: parseInt(f.nPessoas)||0, minhaParte: parseFloat(f.minhaParte)||0, statusMensal: sm });
+    onSalvar({ ...f, quantidadeParcelas: qt, valorTotal: parseFloat(f.valorTotal)||0, valorParcela: parseFloat(f.valorParcela)||0, nPessoas: parseInt(f.nPessoas)||0, minhaParte: parseFloat(f.minhaParte)||0, primeiraFatura: f.primeiraFatura||'', statusMensal: sm });
   }
 
   return (
@@ -1127,6 +1258,12 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
 
       <label style={S.label}>Cartão / Forma de Pagamento</label>
       <input style={S.input} placeholder="Ex: Nubank, Itaú, C6..." value={f.cartao||""} onChange={e => setF(p => ({...p, cartao: e.target.value}))}/>
+
+      <label style={S.label}>Primeira Fatura</label>
+      <select style={S.input} value={f.primeiraFatura||""} onChange={e => setF(p => ({...p, primeiraFatura: e.target.value}))}>
+        <option value="">— Selecione o mês inicial —</option>
+        {MESES_SELECT.map(m => <option key={m} value={m}>{m}</option>)}
+      </select>
 
       <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:8,marginTop:4}}>👥 Divisão (opcional)</div>
       <div style={{display:"flex",gap:8,marginBottom:14}}>
