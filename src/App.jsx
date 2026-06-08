@@ -1332,8 +1332,7 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
   const SUBTABS = [
     {id:"conversor",label:"💱 Câmbio"},
 
-    {id:"dolar",label:"📈 Meu Dólar"},
-    {id:"bagagem",label:"⚖ Bagagem"},
+
 
   ];
   return (
@@ -1344,8 +1343,6 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
         ))}
       </div>
       {subTab==="conversor"&&<ConversorTab settings={settings}/>}
-      {subTab==="dolar"&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
-      {subTab==="bagagem"&&<BagagemTab produtos={produtos} settings={settings}/>}
 
     </div>
   );
