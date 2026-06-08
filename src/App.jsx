@@ -40,7 +40,7 @@ const C = {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const INITIAL_SETTINGS = { dollarPago:5.62, iof:3.38, spread:0.99, taxa:6.5, pesoMax:23000, totalDolarViagem:3000 };
-const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","Game Stop","Apple","Restaurante","Uber","Passeio","Outro"];
+const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","GameStop","Apple","Restaurante","Uber","Passeio","Outro"];
 const PRIORIDADES = ["Alta","Média","Baixa"];
 const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
 
@@ -343,6 +343,7 @@ export default function App() {
   const [showForm, setShowForm] = useState(false);
   const [showGastoForm, setShowGastoForm] = useState(false);
   const [prodSubTab, setProdSubTab] = useState("compras");
+  const [calcSubTab, setCalcSubTab] = useState("conversor");
   const [editProd, setEditProd] = useState(null);
   const [editGasto, setEditGasto] = useState(null);
   const [notification, setNotification] = useState(null);
