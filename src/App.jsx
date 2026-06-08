@@ -1,1279 +1,1174 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
+import { db } from "./firebase";
+import { doc, onSnapshot, setDoc, collection, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
 
+// ─── FIREBASE AUTH / FIRESTORE PERSISTENCE ────────────────────────────────
+const auth = getAuth();
 
-// ─── LOCALSTORAGE PERSISTENCE ────────────────────────────────────────────────
-const STORAGE_KEY = 'travelshop_v1';
+const normalizeCloudState = data => ({
+  settings: data?.settings || INITIAL_SETTINGS,
+  produtos: Array.isArray(data?.produtos) ? data.produtos : SAMPLE_PRODUTOS,
+  itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
+  gastos: Array.isArray(data?.gastos) ? data.gastos : [],
+});
 
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch { return null; }
-}
-
-function saveState(state) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {
-    console.warn('localStorage full:', e);
-  }
+async function saveCloudState(userDocRef, state) {
+  await setDoc(userDocRef, {
+    ...state,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 }
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
 const C = {
-  bg:"#F8FAFC",bgCard:"#FFFFFF",border:"#E5E7EB",borderLight:"#F1F5F9",
-  primary:"#2563EB",primaryLight:"#EFF6FF",gradientA:"#2563EB",gradientB:"#06B6D4",
-  success:"#10B981",successLight:"#ECFDF5",warning:"#F59E0B",warningLight:"#FFFBEB",
-  danger:"#EF4444",dangerLight:"#FEF2F2",purple:"#8B5CF6",purpleLight:"#F5F3FF",
-  text:"#0F172A",textMid:"#475569",textLight:"#94A3B8",textXLight:"#CBD5E1",
+  bg:"#F8FAFC",bgCard:\"#FFFFFF\",border:\"#E5E7EB\",borderLight:\"#F1F5F9\",
+  primary:\"#2563EB\",primaryLight:\"#EFF6FF\",gradientA:\"#2563EB\",gradientB:\"#06B6D4\",
+  success:\"#10B981\",successLight:\"#ECFDF5\",warning:\"#F59E0B\",warningLight:\"#FFFBEB\",
+  danger:\"#EF4444\",dangerLight:\"#FEF2F2\",purple:\"#8B5CF6\",purpleLight:\"#F5F3FF\",
+  text:\"#0F172A\",textMid:\"#475569\",textLight:\"#94A3B8\",textXLight:\"#E2E8F0\",
 };
 
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const INITIAL_SETTINGS = { dollarPago:5.62, iof:3.38, spread:0.99, taxa:6.5, pesoMax:23000, totalDolarViagem:3000 };
-const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","Newegg","Apple","Restaurante","Uber","Passeio","Outro"];
-const PRIORIDADES = ["Alta","Média","Baixa"];
-const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
+// ─── CONSTANTS & INITIAL STATES ──────────────────────────────────────────────
+const CATEGORIES = [
+  { id: "compras", label: "Compras/Lojas", icon: "🛍️", color: C.primary },
+  { id: "alimentacao", label: "Alimentação", icon: "🍔", color: C.warning },
+  { id: "hospedagem", label: "Hospedagem", icon: "🏨", color: C.purple },
+  { id: "transporte", label: "Transporte/Gasolina", icon: "🚗", color: C.success },
+  { id: "lazer", label: "Lazer/Ingressos", icon: "🎟️", color: C.gradientB },
+  { id: "outros", label: "Outros", icon: "📦", color: C.textMid }
+];
 
-// ─── CALC ─────────────────────────────────────────────────────────────────────
-const calcDolarAjustado = s => s.dollarPago * (1 + (s.iof + s.spread) / 100);
-const calcUsdFinal = (usd, s) => usd * (1 + s.taxa / 100);
-const calcBRL = (usd, s) => calcUsdFinal(usd, s) * calcDolarAjustado(s);
-const calcBRLPago = (usd, s, dp) => calcUsdFinal(usd, s) * dp;
-const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
+const INITIAL_SETTINGS = { taxRate: 6.5, exchangeRate: 5.80, budgetUSD: 2000, pyrUSD: 0 };
 
-// tudo em USD — dolarPago = cotação usada na compra
-function calcMinhaParteUSD(gasto) {
-  const totalUSD = parseFloat(gasto.usd) || 0;
-  if (!gasto.divisao || gasto.divisao.length === 0) return totalUSD;
-  return totalUSD / (1 + gasto.divisao.length);
-}
-function usdToBRL(usd, gasto, settings) {
-  const cotacao = parseFloat(gasto.dolarPago) || settings.dollarPago;
-  return usd * cotacao;
-}
-function calcTotalGastosUSD(gastos) {
-  return gastos.reduce((a, g) => a + calcMinhaParteUSD(g), 0);
-}
+const SAMPLE_PRODUTOS = [
+  { id: 1, nome: "Exemplo de Produto", local: "Walmart", valorUSD: 10, qtd: 1, categoria: "compras", link: "", nota: "" }
+];
 
-// ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
-async function fetchCotacao() {
-  try {
-    const res = await fetch("https://economia.awesomeapi.com.br/last/USD-BRL", { signal: AbortSignal.timeout(5000) });
-    const data = await res.json();
-    const bid = parseFloat(data?.USDBRL?.bid);
-    if (!isNaN(bid)) return bid;
-  } catch {}
-  return null;
-}
+// ─── TRANSLATION MAP ─────────────────────────────────────────────────────────
+const CAT_TRANSLATIONS = {
+  "compras": "Compras", "alimentacao": "Alimentação", "hospedagem": "Hospedagem",
+  "transporte": "Transporte", "lazer": "Lazer", "outros": "Outros"
+};
 
-const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
+export default function App() {
+  // --- Auth & Sync States ---
+  const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authIsSignUp, setAuthIsSignUp] = useState(false);
+  const [authError, setAuthError] = useState("");
 
-function ProductImage({ produto, style={}, iconSize=44 }) {
-  const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)] || null);
-  const [loading, setLoading] = useState(!imgUrl);
-  const [err, setErr] = useState(false);
+  // --- Core Application States ---
+  const [activeTab, setActiveTab] = useState(0); // 0:Produtos, 1:Itens Legais, 2:Gastos, 3:Resumo, 4:Parcelas, 5:Dashboard, 6:Calculadora
+  const [settings, setSettings] = useState(INITIAL_SETTINGS);
+  const [produtos, setProdutos] = useState([]);
+  const [itensLegais, setItensLegais] = useState([]);
+  const [gastos, setGastos] = useState([]);
+  const [parcelas, setParcelas] = useState([]);
+  const [parcelasLoading, setParcelasLoading] = useState(true);
 
+  // --- UI Control States ---
+  const [search, setSearch] = useState("");
+  const [catFilter, setCatFilter] = useState("all");
+  const [lojaFilter, setLojaFilter] = useState("all");
+  const [editingItem, setEditingItem] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalType, setModalType] = useState("produto"); // produto, itemLegal, gasto, parcela
+  const [notification, setNotification] = useState(null);
+
+  // Reference for the cloud document
+  const userDocRefRef = useRef(null);
+  const isInitialLoadRef = useRef(true);
+
+  // --- Auth Observer ---
   useEffect(() => {
-    let cancelled = false;
-    const key = String(produto.id);
-
-    if (imageCache[key]) {
-      setImgUrl(imageCache[key]);
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setErr(false);
-
-    getProductImage(produto).then(url => {
-      if (cancelled) return;
-      if (url) {
-        setImgUrl(url);
-      } else {
-        setErr(true);
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setAuthLoading(false);
+      if (!currentUser) {
+        userDocRefRef.current = null;
+        isInitialLoadRef.current = true;
+        setProdutos([]);
+        setItensLegais([]);
+        setGastos([]);
+        setParcelas([]);
       }
-      setLoading(false);
-    }).catch(() => {
-      if (cancelled) return;
-      setErr(true);
-      setLoading(false);
+    });
+    return unsubscribe;
+  }, []);
+
+  // --- Firestore Real-time Sync (Core Data) ---
+  useEffect(() => {
+    if (!user) return;
+    const docRef = doc(db, "usuarios_pwa", user.uid);
+    userDocRefRef.current = docRef;
+
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const cloudData = normalizeCloudState(docSnap.data());
+        setSettings(cloudData.settings);
+        setProdutos(cloudData.produtos);
+        setItensLegais(cloudData.itensLegais);
+        setGastos(cloudData.gastos);
+      } else {
+        setSettings(INITIAL_SETTINGS);
+        setProdutos(SAMPLE_PRODUTOS);
+        setItensLegais([]);
+        setGastos([]);
+        saveCloudState(docRef, {
+          settings: INITIAL_SETTINGS,
+          produtos: SAMPLE_PRODUTOS,
+          itensLegais: [],
+          gastos: []
+        });
+      }
+      isInitialLoadRef.current = false;
+    }, (error) => {
+      console.error("Firestore sync error:", error);
+      showNotification("Erro ao sincronizar com a nuvem", "danger");
     });
 
-    return () => {
-      cancelled = true;
-    };
-  }, [produto.id, produto.link, produto.imagem]);
+    return unsubscribe;
+  }, [user]);
 
-  if (!imgUrl || err) {
+  // --- Firestore Real-time Sync (Parcelas) ---
+  useEffect(() => {
+    if (!user) return;
+    const parcelasCollRef = collection(db, "usuarios_pwa", user.uid, "parcelas");
+
+    const unsubscribe = onSnapshot(parcelasCollRef, (snap) => {
+      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setParcelas(docs);
+      setParcelasLoading(false);
+    }, (error) => {
+      console.error("Error fetching parcelas:", error);
+      setParcelasLoading(false);
+    });
+
+    return unsubscribe;
+  }, [user]);
+
+  // --- Trigger Cloud Saves ---
+  const triggerCloudSave = useCallback((updatedFields) => {
+    if (!userDocRefRef.current || isInitialLoadRef.current) return;
+    
+    const currentState = {
+      settings,
+      produtos,
+      itensLegais,
+      gastos,
+      ...updatedFields
+    };
+    
+    saveCloudState(userDocRefRef.current, currentState).catch(err => {
+      console.error("Cloud save failed:", err);
+      showNotification("Erro ao salvar dados na nuvem", "danger");
+    });
+  }, [settings, produtos, itensLegais, gastos]);
+
+  const saveParcelaToCloud = async (parcelaData) => {
+    if (!user) return;
+    const id = parcelaData.id || "par_" + Date.now();
+    const docRef = doc(db, "usuarios_pwa", user.uid, "parcelas", id);
+    await setDoc(docRef, { ...parcelaData, id }, { merge: true });
+    showNotification("Parcela salva na nuvem!", "success");
+  };
+
+  const deleteParcelaFromCloud = async (id) => {
+    if (!user) return;
+    const docRef = doc(db, "usuarios_pwa", user.uid, "parcelas", id);
+    await deleteDoc(docRef);
+    showNotification("Parcela removida!", "warning");
+  };
+
+  // --- UI Notification Helper ---
+  const showNotification = (text, type = "success") => {
+    setNotification({ text, type });
+    setTimeout(() => setNotification(null), 3000);
+  };
+
+  // --- Auth Handlers ---
+  const handleAuthSubmit = async (e) => {
+    e.preventDefault();
+    setAuthError("");
+    if (!authEmail || !authPassword) {
+      setAuthError("Preencha todos os campos.");
+      return;
+    }
+    try {
+      if (authIsSignUp) {
+        await createUserWithEmailAndPassword(auth, authEmail, authPassword);
+        showNotification("Conta criada com sucesso!", "success");
+      } else {
+        await signInWithEmailAndPassword(auth, authEmail, authPassword);
+        showNotification("Login realizado!", "success");
+      }
+    } catch (err) {
+      console.error(err);
+      if (err.code === "auth/wrong-password") setAuthError("Senha incorreta.");
+      else if (err.code === "auth/user-not-found") setAuthError("Usuário não encontrado.");
+      else if (err.code === "auth/email-already-in-use") setAuthError("E-mail já cadastrado.");
+      else setAuthError("Erro na autenticação. Verifique os dados.");
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      showNotification("Você saiu do app.", "warning");
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  // --- Actions ---
+  const updateSettings = (key, value) => {
+    const val = parseFloat(value) || 0;
+    const next = { ...settings, [key]: val };
+    setSettings(next);
+    if (userDocRefRef.current) {
+      saveCloudState(userDocRefRef.current, { settings: next, produtos, itensLegais, gastos });
+    }
+  };
+
+  const handleSave = (item) => {
+    if (modalType === "produto") {
+      let next;
+      if (item.id) {
+        next = produtos.map(p => p.id === item.id ? item : p);
+      } else {
+        next = [...produtos, { ...item, id: Date.now() }];
+      }
+      setProdutos(next);
+      triggerCloudSave({ produtos: next });
+      showNotification(item.id ? "Produto atualizado!" : "Produto adicionado!");
+    } else if (modalType === "itemLegal") {
+      let next;
+      if (item.id) {
+        next = itensLegais.map(i => i.id === item.id ? item : i);
+      } else {
+        next = [...itensLegais, { ...item, id: Date.now() }];
+      }
+      setItensLegais(next);
+      triggerCloudSave({ itensLegais: next });
+      showNotification(item.id ? "Item atualizado!" : "Item adicionado!");
+    } else if (modalType === "gasto") {
+      let next;
+      if (item.id) {
+        next = gastos.map(g => g.id === item.id ? item : g);
+      } else {
+        next = [...gastos, { ...item, id: Date.now() }];
+      }
+      setGastos(next);
+      triggerCloudSave({ gastos: next });
+      showNotification(item.id ? "Gasto atualizado!" : "Gasto adicionado!");
+    } else if (modalType === "parcela") {
+      saveParcelaToCloud(item);
+    }
+    setIsModalOpen(false);
+    setEditingItem(null);
+  };
+
+  const handleDelete = (id, type) => {
+    if (window.confirm("Deseja realmente excluir este item?")) {
+      if (type === "produto") {
+        const next = produtos.filter(p => p.id !== id);
+        setProdutos(next);
+        triggerCloudSave({ produtos: next });
+        showNotification("Produto removido", "warning");
+      } else if (type === "itemLegal") {
+        const next = itensLegais.filter(i => i.id !== id);
+        setItensLegais(next);
+        triggerCloudSave({ itensLegais: next });
+        showNotification("Item removido", "warning");
+      } else if (type === "gasto") {
+        const next = gastos.filter(g => g.id !== id);
+        setGastos(next);
+        triggerCloudSave({ gastos: next });
+        showNotification("Gasto removido", "warning");
+      } else if (type === "parcela") {
+        deleteParcelaFromCloud(id);
+      }
+    }
+  };
+
+  // --- Financial Computations ---
+  const taxMultiplier = useMemo(() => 1 + (settings.taxRate / 100), [settings.taxRate]);
+
+  const totals = useMemo(() => {
+    let prodUSD = 0;
+    produtos.forEach(p => {
+      const v = (p.valorUSD || 0) * (p.qtd || 1);
+      prodUSD += p.categoria === "compras" ? v * taxMultiplier : v;
+    });
+
+    let legalUSD = 0;
+    itensLegais.forEach(i => {
+      const v = (i.valorUSD || 0) * (i.qtd || 1);
+      legalUSD += i.categoria === "compras" ? v * taxMultiplier : v;
+    });
+
+    let gastosUSD = 0;
+    gastos.forEach(g => {
+      gastosUSD += (g.valorUSD || 0);
+    });
+
+    const totalUSD = prodUSD + legalUSD + gastosUSD;
+    const totalBRL = totalUSD * settings.exchangeRate;
+    const remainingUSD = settings.budgetUSD - totalUSD;
+
+    return { prodUSD, legalUSD, gastosUSD, totalUSD, totalBRL, remainingUSD };
+  }, [produtos, itensLegais, gastos, taxMultiplier, settings.exchangeRate, settings.budgetUSD]);
+
+  // Unique stores list for filtering
+  const lojasUnicas = useMemo(() => {
+    const s = new Set();
+    produtos.forEach(p => p.local && s.add(p.local));
+    itensLegais.forEach(i => i.local && s.add(i.local));
+    gastos.forEach(g => g.local && s.add(g.local));
+    return Array.from(s);
+  }, [produtos, itensLegais, gastos]);
+
+  // --- Auth View Fallback ---
+  if (authLoading) {
     return (
-      <div style={{
-        width: "100%",
-        height: "100%",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: `linear-gradient(135deg, ${C.primaryLight}, ${C.purpleLight})`,
-        ...style
-      }}>
-        {loading ? (
-          <div className="spinner" />
-        ) : (
-          <span style={{ fontSize: iconSize }}>
-            {LOJA_EMOJI[produto.loja] || "🛍"}
-          </span>
-        )}
+      <div style={{ display: "flex", height: "100vh", alignItems: "center", justifyContent: "center", background: C.bg, fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ width: 40, height: 40, border: `4px solid ${C.border}`, borderTopColor: C.primary, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 15px" }} />
+          <p style={{ color: C.textMid, fontSize: 14, fontWeight: 500 }}>Carregando TravelShop...</p>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div style={{ minHeight: "100vh", background: C.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, fontFamily: "'Inter', sans-serif" }}>
+        <div style={{ background: C.bgCard, borderRadius: 24, padding: 32, width: "100%", maxWidth: 420, boxShadow: "0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.05)" }}>
+          <div style={{ textAlign: "center", marginBottom: 32 }}>
+            <span style={{ fontSize: 48 }}>✈️</span>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: C.text, marginTop: 12 }}>TravelShop</h1>
+            <p style={{ color: C.textLight, fontSize: 14, marginTop: 4 }}>Gerencie as compras e custos da sua viagem</p>
+          </div>
+
+          {authError && (
+            <div style={{ background: C.dangerLight, color: C.danger, padding: "12px 16px", borderRadius: 12, fontSize: 13, fontWeight: 600, marginBottom: 20 }}>
+              {authError}
+            </div>
+          )}
+
+          <form onSubmit={handleAuthSubmit}>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 6 }}>E-mail</label>
+              <input type="email" value={authEmail} onChange={e => setAuthEmail(e.target.value)} placeholder="seu@email.com" style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: `1px solid ${C.border}`, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+            </div>
+            <div style={{ marginBottom: 24 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: C.textMid, marginBottom: 6 }}>Senha</label>
+              <input type="password" value={authPassword} onChange={e => setAuthPassword(e.target.value)} placeholder="••••••••" style={{ width: "100%", padding: "12px 16px", borderRadius: 12, border: `1px solid ${C.border}`, fontSize: 14, outline: "none", boxSizing: "border-box" }} />
+            </div>
+
+            <button type="submit" style={{ width: "100%", padding: "14px", borderRadius: 12, background: C.primary, color: "#FFF", border: "none", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 4px 12px rgba(37,99,235,0.2)" }}>
+              {authIsSignUp ? "Criar Minha Conta" : "Entrar no Aplicativo"}
+            </button>
+          </form>
+
+          <div style={{ textAlign: "center", marginTop: 24 }}>
+            <button onClick={() => { setAuthIsSignUp(!authIsSignUp); setAuthError(""); }} style={{ background: "none", border: "none", color: C.primary, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>
+              {authIsSignUp ? "Já tem uma conta? Faça login" : "Não tem conta? Cadastre-se grátis"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
-    <div style={{ width: "100%", height: "100%", ...style }}>
-      <img
-        src={imgUrl}
-        alt={produto.nome}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        onError={() => setErr(true)}
-      />
-    </div>
-  );
-}
-
-// ─── XLSX PARSER ─────────────────────────────────────────────────────────────
-function parseSheet(wb, sheetName) {
-  const ws = wb.Sheets[sheetName]; if (!ws) return [];
-  const rows = XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
-  let hi = rows.findIndex(r=>r&&r.some(c=>c==="PRODUTO")); if (hi<0) return [];
-  const hd=rows[hi], io=n=>hd.findIndex(h=>h===n);
-  const [iL,iP,iC,iW,iLj,iV]=[io("Link"),io("PRODUTO"),io("Classificação"),io("Peso/oz"),io("LOCAL"),io("VALOR")];
-  return rows.slice(hi+1).filter(r=>r[iP]&&typeof r[iP]==="string").map((r,i)=>{
-    const tipo=(r[iC]||"").toString().toLowerCase().includes("líquido")||(r[iC]||"").toString().toLowerCase().includes("liquido")?"liquido":"solido";
-    const oz=parseFloat(r[iW])||0;
-    return { id:Date.now()+i+Math.random(), nome:r[iP].trim(), loja:(r[iLj]||"Outro").toString().trim(),
-      usd:parseFloat(r[iV])||0, peso:tipo==="liquido"?oz*28.3495:oz, volume:tipo==="liquido"?oz:0,
-      tipo, status:"pendente", prioridade:"Média", link:r[iL]?r[iL].toString().trim():"", imagem:"", dollarPago:null };
-  });
-}
-
-// ─── SAMPLE DATA ─────────────────────────────────────────────────────────────
-const SAMPLE_PRODUTOS = [
-  {id:1,nome:"AirPods Pro 2",loja:"Apple",usd:249,peso:61,tipo:"solido",volume:0,status:"pendente",prioridade:"Alta",link:"https://www.amazon.com/Apple-AirPods-Pro-Cancellation-Transparency/dp/B0BDHWDR12",imagem:"",dollarPago:null},
-  {id:2,nome:"Tide Pods 31ct",loja:"Walmart",usd:9.99,peso:640,tipo:"solido",volume:0,status:"comprado",prioridade:"Baixa",link:"https://www.walmart.com/ip/Tide-PODS-Laundry-Detergent-Packs-Original-Scent-31-Count/42351728",imagem:"",dollarPago:5.68},
-  {id:3,nome:"Keychron K2",loja:"Amazon",usd:119,peso:870,tipo:"solido",volume:0,status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:null},
-];
-
-// Load persisted state or use defaults
-const _saved = loadState();
-const _initSettings = _saved?.settings || INITIAL_SETTINGS;
-const _initProdutos = _saved?.produtos || SAMPLE_PRODUTOS;
-const _initItensLegais = _saved?.itensLegais || [];
-const _initGastos = _saved?.gastos || [];
-
-
-// ─── APP ─────────────────────────────────────────────────────────────────────
-export default function App() {
-  const [tab, setTab] = useState(0);
-  const [settings, setSettings] = useState(_initSettings);
-  const [produtos, setProdutos] = useState(_initProdutos);
-  const [itensLegais, setItensLegais] = useState(_initItensLegais);
-  const [gastos, setGastos] = useState(_initGastos); // gastos livres + produtos comprados espelhados
-  const [showSettings, setShowSettings] = useState(false);
-  const [showForm, setShowForm] = useState(false);
-  const [showGastoForm, setShowGastoForm] = useState(false);
-  const [editProd, setEditProd] = useState(null);
-  const [editGasto, setEditGasto] = useState(null);
-  const [notification, setNotification] = useState(null);
-  const [cotacaoLoading, setCotacaoLoading] = useState(false);
-
-  // Auto-save to localStorage whenever data changes
-  useEffect(() => {
-    saveState({ settings, produtos, itensLegais, gastos });
-  }, [settings, produtos, itensLegais, gastos]);
-
-  function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
-
-  function toggleStatus(id) {
-    setProdutos(ps => ps.map(p => {
-      if (p.id !== id) return p;
-      const newStatus = p.status === "comprado" ? "pendente" : "comprado";
-      // sync gastos: add or remove produto entry
-      if (newStatus === "comprado") {
-        const brl = calcBRL(p.usd, settings);
-        setGastos(gs => gs.some(g=>g.produtoId===id) ? gs : [...gs, {
-          id: `prod_${id}`, produtoId:id, descricao:p.nome, loja:p.loja,
-          usd:p.usd, dolarPago:p.dollarPago||settings.dollarPago,
-          brl: null,
-          categoria:"🛍 Compras", divisao:[], data: new Date().toLocaleDateString("pt-BR"), tipo:"produto"
-        }]);
-      } else {
-        setGastos(gs => gs.filter(g => g.produtoId !== id));
-      }
-      return {...p, status: newStatus};
-    }));
-  }
-
-  function saveGasto(g) {
-    if (g.id) setGastos(gs=>gs.map(x=>x.id===g.id?g:x));
-    else setGastos(gs=>[...gs,{...g,id:Date.now()}]);
-    notify(g.id?"Gasto atualizado!":"Gasto adicionado!");
-    setShowGastoForm(false); setEditGasto(null);
-  }
-
-  function deleteProd(id,list="produtos") {
-    if(list==="legais") setItensLegais(ps=>ps.filter(p=>p.id!==id));
-    else { setProdutos(ps=>ps.filter(p=>p.id!==id)); setGastos(gs=>gs.filter(g=>g.produtoId!==id)); }
-    notify("Removido","error");
-  }
-
-  function saveProd(prod) {
-    delete imageCache[String(prod.id)];
-    if(prod._legais){ prod.id?setItensLegais(ps=>ps.map(p=>p.id===prod.id?prod:p)):setItensLegais(ps=>[...ps,{...prod,id:Date.now()}]); }
-    else { prod.id?setProdutos(ps=>ps.map(p=>p.id===prod.id?prod:p)):setProdutos(ps=>[...ps,{...prod,id:Date.now()}]); }
-    notify(prod.id?"Atualizado!":"Adicionado!"); setShowForm(false); setEditProd(null);
-  }
-
-  function moveToList(item) {
-    setProdutos(ps=>[...ps,{...item,_legais:undefined,status:"pendente",prioridade:"Média",id:Date.now()}]);
-    setItensLegais(ps=>ps.filter(p=>p.id!==item.id)); notify("Movido para lista!");
-  }
-
-  function handleImport(compras,legais) {
-    if(compras.length) setProdutos(prev=>{const e=new Set(prev.map(p=>p.nome.toLowerCase()));return [...prev,...compras.filter(p=>!e.has(p.nome.toLowerCase()))];});
-    if(legais.length) setItensLegais(prev=>{const e=new Set(prev.map(p=>p.nome.toLowerCase()));return [...prev,...legais.filter(p=>!e.has(p.nome.toLowerCase()))];});
-    notify(`✅ ${compras.length} compras + ${legais.length} itens importados!`);
-    setShowSettings(false);
-  }
-
-  const stats = useMemo(()=>{
-    const comprados=produtos.filter(p=>p.status==="comprado");
-    const pesoTotal=produtos.reduce((a,p)=>a+pesoGramas(p),0);
-    const valorTotalUSD=produtos.reduce((a,p)=>a+p.usd,0);
-    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRL(p.usd,settings),0);
-    const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
-    const totalMeusGastosUSD=calcTotalGastosUSD(gastos);
-    return {total:produtos.length,comprados:comprados.length,pendentes:produtos.length-comprados.length,pesoTotal,valorTotalUSD,valorTotalBRL,valorGasto,lojas:new Set(produtos.map(p=>p.loja)).size,totalMeusGastosUSD};
-  },[produtos,settings,gastos]);
-
-  const pesoPercent=Math.min(100,(stats.pesoTotal/settings.pesoMax)*100);
-  const pesoColor=pesoPercent<70?C.success:pesoPercent<90?C.warning:C.danger;
-  const pesoBg=pesoPercent<70?C.successLight:pesoPercent<90?C.warningLight:C.dangerLight;
-
-  const TABS=[{label:"Início",icon:"⊞"},{label:"Produtos",icon:"📦"},{label:"Galeria",icon:"▦"},{label:"Gastos",icon:"💸"},{label:"Stats",icon:"◈"},{label:"Calc",icon:"⟨⟩"}];
-
-  return (
-    <div style={S.app}>
+    <div style={{ background: C.bg, minHeight: "100vh", paddingBottom: 90, fontFamily: "'Inter', sans-serif", color: C.text }}>
       <style>{CSS}</style>
-      {notification&&<div className={`notif notif-${notification.type}`}>{notification.msg}</div>}
-      <div style={S.header}>
-        <div style={S.headerLeft}>
-          <div style={S.logoBox}>✈</div>
-          <div>
-            <div style={S.headerTitle}>TravelShop</div>
-            <div style={S.headerSub}>Orlando 2027</div>
+      
+      {notification && (
+        <div className="notif" style={{
+          background: notification.type === "success" ? C.success : notification.type === "danger" ? C.danger : C.warning,
+          color: "#FFF"
+        }}>
+          {notification.text}
+        </div>
+      )}
+
+      {/* --- HEADER CONTROL PANEL ─── */}
+      <header style={{ background: C.bgCard, borderBottom: `1px solid ${C.border}`, padding: "16px 20px", sticky: "top", zIndex: 100 }}>
+        <div style={{ maxWidth: 1200, margin: "0 auto", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "-0.5px", display: "flex", alignItems: "center", gap: 8 }}>
+                <span>🇺🇸</span> TravelShop <span style={{ fontSize: 12, fontWeight: 500, color: C.textLight, background: C.borderLight, padding: "2px 8px", borderRadius: 6 }}>v1.2</span>
+              </h1>
+              <p style={{ fontSize: 11, color: C.textLight, marginTop: 2 }}>Usuário: {user.email}</p>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={handleLogout} style={{ padding: "6px 12px", borderRadius: 8, background: "none", border: `1px solid ${C.border}`, fontSize: 12, fontWeight: 600, color: C.danger, cursor: "pointer" }}>Sair</button>
+              <button onClick={() => { setModalType(activeTab === 1 ? "itemLegal" : activeTab === 2 ? "gasto" : activeTab === 4 ? "parcela" : "produto"); setEditingItem(null); setIsModalOpen(true); }} style={{ background: `linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`, color: "#FFF", border: "none", padding: "10px 16px", borderRadius: 10, fontSize: 13, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", gap: 6, boxShadow: "0 4px 10px rgba(37,99,235,0.15)" }}>
+                <span>＋</span> {activeTab === 1 ? "Item Legal" : activeTab === 2 ? "Gasto" : activeTab === 4 ? "Parcela" : "Produto"}
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Settings Grid */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10 }}>
+            <div style={{ background: C.bg, padding: "10px 12px", borderRadius: 12, border: `1px solid ${C.borderLight}` }}>
+              <span style={{ fontSize: 10, color: C.textLight, fontWeight: 700, display: \"block\", transform: \"translateY(-2px)\" }}>TAXA FLÓRIDA</span>
+              <div style={{ display: \"flex\", alignItems: \"center\" }}>
+                <input type=\"number\" step=\"0.01\" value={settings.taxRate} onChange={e => updateSettings(\"taxRate\", e.target.value)} style={{ background: \"none\", border: \"none\", fontSize: 15, fontWeight: 800, color: C.text, width: \"100%\", outline: \"none\" }} />
+                <span style={{ fontSize: 13, fontWeight: 700, color: C.textMid }}>%</span>
+              </div>
+            </div>
+            <div style={{ background: C.bg, padding: \"10px 12px\", borderRadius: 12, border: `1px solid ${C.borderLight}` }}>
+              <span style={{ fontSize: 10, color: C.textLight, fontWeight: 700, display: \"block\", transform: \"translateY(-2px)\" }}>CÂMBIO COM IOF</span>
+              <div style={{ display: \"flex\", alignItems: \"center\" }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: C.textMid, marginRight: 2 }}>R$</span>
+                <input type=\"number\" step=\"0.01\" value={settings.exchangeRate} onChange={e => updateSettings(\"exchangeRate\", e.target.value)} style={{ background: \"none\", border: \"none\", fontSize: 15, fontWeight: 800, color: C.text, width: \"100%\", outline: \"none\" }} />
+              </div>
+            </div>
           </div>
         </div>
-        <button style={S.settingsBtn} onClick={()=>setShowSettings(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.textMid} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          </button>
+      </header>
+
+      {/* --- FINANCIAL HERO CARD ─── */}
+      <div style={{ padding: \"16px 20px 0\", maxWidth: 1200, margin: \"0 auto\" }}>
+        <div style={{ background: `linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`, borderRadius: 20, padding: 20, color: \"#FFF\", boxShadow: \"0 10px 20px -5px rgba(37,99,235,0.2)\" }}>
+          <div style={{ display: \"flex\", justifyContent: \"space-between\", opacity: 0.85, fontSize: 12, fontWeight: 600 }}>
+            <span>TOTAL GERAL INVESTIDO</span>
+            <span>CÂMBIO: R$ {settings.exchangeRate.toFixed(2)}</span>
+          </div>
+          <div style={{ fontSize: 32, fontWeight: 800, margin: \"4px 0 16px\", letterSpacing: \"-1px\" }}>
+            USD {totals.totalUSD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            <span style={{ fontSize: 16, fontWeight: 500, marginLeft: 10, opacity: 0.9 }}>
+              (R$ {totals.totalBRL.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+            </span>
+          </div>
+          <div style={{ display: \"grid\", gridTemplateColumns: \"repeat(3, 1fr)\", gap: 8, background: \"rgba(255,255,255,0.1)\", padding: 12, borderRadius: 14 }}>
+            <div>
+              <span style={{ display: \"block\", fontSize: 9, opacity: 0.75, fontWeight: 700 }}>COMPRAS</span>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>${totals.prodUSD.toFixed(1)}</span>
+            </div>
+            <div>
+              <span style={{ display: \"block\", fontSize: 9, opacity: 0.75, fontWeight: 700 }}>LEGAIS</span>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>${totals.legalUSD.toFixed(1)}</span>
+            </div>
+            <div>
+              <span style={{ display: \"block\", fontSize: 9, opacity: 0.75, fontWeight: 700 }}>GASTOS</span>
+              <span style={{ fontSize: 13, fontWeight: 700 }}>${totals.gastosUSD.toFixed(1)}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div style={S.content}>
-        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg}/>}
-        {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList}/>}
-        {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
-        {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus}/>}
-        {tab===4&&<StatsTab produtos={produtos} gastos={gastos} settings={settings}/>}
-        {tab===5&&<CalcTab settings={settings}/>}
-      </div>
+      {/* --- FILTERS DISPLAY (Tabs 0,1,2 Only) --- */}
+      {[0, 1, 2].includes(activeTab) && (
+        <div style={{ padding: \"12px 20px 0\", maxWidth: 1200, margin: \"0 auto\", display: \"flex\", flexDirection: \"column\", gap: 8 }}>
+          <input type=\"text\" placeholder=\"🔍 Buscar item ou local...\" value={search} onChange={e => setSearch(e.target.value)} style={{ width: \"100%\", padding: \"11px 14px\", borderRadius: 12, border: `1px solid ${C.border}`, background: C.bgCard, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+          <div style={{ display: \"grid\", gridTemplateColumns: \"1fr 1fr\", gap: 8 }}>
+            <select value={catFilter} onChange={e => setCatFilter(e.target.value)} style={{ width: \"100%\", padding: 10, borderRadius: 12, border: `1px solid ${C.border}`, background: C.bgCard, fontSize: 12, fontWeight: 600, color: C.textMid, outline: \"none\" }}>
+              <option value=\"all\">📂 Todas Categorias</option>
+              {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+            </select>
+            <select value={lojaFilter} onChange={e => setLojaFilter(e.target.value)} style={{ width: \"100%\", padding: 10, borderRadius: 12, border: `1px solid ${C.border}`, background: C.bgCard, fontSize: 12, fontWeight: 600, color: C.textMid, outline: \"none\" }}>
+              <option value=\"all\">🏪 Todos Locais</option>
+              {lojasUnicas.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
 
-      <nav style={S.nav}>
-        {TABS.map((t,i)=>(
-          <button key={i} style={{...S.navBtn,...(tab===i?S.navBtnActive:{})}} onClick={()=>setTab(i)}>
-            <span style={{fontSize:18,lineHeight:1}}>{t.icon}</span>
-            <span style={S.navLabel}>{t.label}</span>
-            {tab===i&&<div style={S.navIndicator}/>}
-          </button>
-        ))}
+      {/* --- MAIN TABS ROUTER --- */}
+      <main style={{ padding: \"16px 20px\", maxWidth: 1200, margin: \"0 auto\" }}>
+        {activeTab === 0 && <ProdutosTab produtos={produtos} search={search} catFilter={catFilter} lojaFilter={lojaFilter} taxMultiplier={taxMultiplier} onEdit={p => { setModalType(\"produto\"); setEditingItem(p); setIsModalOpen(true); }} onDelete={id => handleDelete(id, \"produto\")} />}
+        {activeTab === 1 && <ItensLegaisTab itensLegais={itensLegais} search={search} catFilter={catFilter} lojaFilter={lojaFilter} taxMultiplier={taxMultiplier} onEdit={i => { setModalType(\"itemLegal\"); setEditingItem(i); setIsModalOpen(true); }} onDelete={id => handleDelete(id, \"itemLegal\")} />}
+        {activeTab === 2 && <GastosTab gastos={gastos} search={search} catFilter={catFilter} lojaFilter={lojaFilter} onEdit={g => { setModalType(\"gasto\"); setEditingItem(g); setIsModalOpen(true); }} onDelete={id => handleDelete(id, \"gasto\")} />}
+        {activeTab === 3 && <ResumoTab produtos={produtos} itensLegais={itensLegais} gastos={gastos} settings={settings} taxMultiplier={taxMultiplier} />}
+        {activeTab === 4 && <ParcelasTab parcelas={parcelas} loading={parcelasLoading} onSave={saveParcelaToCloud} onDelete={id => handleDelete(id, \"parcela\")} />}
+        {activeTab === 5 && <DashboardTab produtos={produtos} itensLegais={itensLegais} gastos={gastos} taxMultiplier={taxMultiplier} />}
+        {activeTab === 6 && <CalculadoraTab settings={settings} updateSettings={updateSettings} />}
+      </main>
+
+      {/* --- NAV BAR ─── */}
+      <nav style={{ position: \"fixed\", bottom: 0, left: 0, right: 0, background: \"rgba(255,255,255,0.92)\", backdropFilter: \"blur(12px)\", borderTop: `1px solid ${C.border}`, display: \"flex\", justifyContent: \"space-around\", padding: \"8px 4px 22px\", zIndex: 100 }}>
+        <NavButton active={activeTab === 0} label=\"Produtos\" icon=\"🛍️\" onClick={() => setActiveTab(0)} />
+        <NavButton active={activeTab === 1} label=\"Legais\" icon=\"✨\" onClick={() => setActiveTab(1)} />
+        <NavButton active={activeTab === 2} label=\"Gastos\" icon=\"💸\" onClick={() => setActiveTab(2)} />
+        <NavButton active={activeTab === 3} label=\"Resumo\" icon=\"📊\" onClick={() => setActiveTab(3)} />
+        <NavButton active={activeTab === 4} label=\"Parcelas\" icon=\"💳\" onClick={() => setActiveTab(4)} />
+        <NavButton active={activeTab === 5} label=\"Dash\" icon=\"📈\" onClick={() => setActiveTab(5)} />
+        <NavButton active={activeTab === 6} label=\"Calc\" icon=\"🧮\" onClick={() => setActiveTab(6)} />
       </nav>
 
-      {tab===1&&<button style={S.fab} onClick={()=>{setEditProd(null);setShowForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
-      {tab===3&&<button style={S.fab} onClick={()=>{setEditGasto(null);setShowGastoForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
-
-      {showSettings&&<SettingsModal settings={settings} onSave={s=>{setSettings(s);notify("Configurações salvas!");}} onImport={handleImport} onClose={()=>setShowSettings(false)}/>}
-      {showForm&&<ProdutoForm prod={editProd} onSave={saveProd} onClose={()=>{setShowForm(false);setEditProd(null);}}/>}
-      {showGastoForm&&<GastoForm gasto={editGasto} settings={settings} onSave={saveGasto} onClose={()=>{setShowGastoForm(false);setEditGasto(null);}}/>}
+      {/* --- FORM MODAL LAYER ─── */}
+      {isModalOpen && (
+        <FormModal type={modalType} item={editingItem} onSave={handleSave} onClose={() => { setIsModalOpen(false); setEditingItem(null); }} />
+      )}
     </div>
   );
 }
 
-// ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg}) {
-  const dolarAj=calcDolarAjustado(settings);
-  const pct=stats.total?Math.round(stats.comprados/stats.total*100):0;
-  const usdRestante=settings.totalDolarViagem - stats.valorTotalUSD;
+// ─── NAV BUTTON COMPONENT ────────────────────────────────────────────────────
+function NavButton({ active, label, icon, onClick }) {
   return (
-    <div style={S.page}>
-      {/* Hero */}
-      <div style={S.heroCard}>
-        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Total planejado</div>
-        <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: R$ {settings.dollarPago.toFixed(4)} · Ajustado: R$ {calcDolarAjustado(settings).toFixed(4)}</div>
-        <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
-          {[`IOF ${settings.iof}%`,`Spread ${settings.spread}%`,`Taxa ${settings.taxa}%`].map(t=>(
-            <span key={t} style={{background:"rgba(255,255,255,0.15)",borderRadius:999,padding:"3px 10px",fontSize:11,color:"rgba(255,255,255,0.9)",fontWeight:500}}>{t}</span>
+    <button onClick={onClick} style={{ background: \"none\", border: \"none\", display: \"flex\", flexDirection: \"column\", alignItems: \"center\", gap: 4, cursor: \"pointer\", padding: \"6px 10px\", borderRadius: 10, minWidth: 52 }}>
+      <span style={{ fontSize: 20, filter: active ? \"none\" : \"grayscale(40%)\", transform: active ? \"scale(1.1)\" : \"none\", transition: \"transform 0.2s\" }}>{icon}</span>
+      <span style={{ fontSize: 9, fontWeight: active ? 800 : 500, color: active ? C.primary : C.textLight }}>{label}</span>
+    </button>
+  );
+}
+
+// ─── TAB 0: PRODUTOS ─────────────────────────────────────────────────────────
+function ProdutosTab({ produtos, search, catFilter, lojaFilter, taxMultiplier, onEdit, onDelete }) {
+  const filtered = useMemo(() => {
+    return produtos.filter(p => {
+      const matchS = p.nome.toLowerCase().includes(search.toLowerCase()) || (p.local && p.local.toLowerCase().includes(search.toLowerCase()));
+      const matchC = catFilter === \"all\" || p.categoria === catFilter;
+      const matchL = lojaFilter === \"all\" || p.local === lojaFilter;
+      return matchS && matchC && matchL;
+    });
+  }, [produtos, search, catFilter, lojaFilter]);
+
+  if (!filtered.length) return <EmptyState text=\"Nenhum produto encontrado.\" />;
+
+  return (
+    <div style={{ display: \"flex\", flexDirection: \"column\", gap: 12 }}>
+      {filtered.map(p => {
+        const costUSD = p.categoria === \"compras\" ? p.valorUSD * taxMultiplier : p.valorUSD;
+        const totalUSD = costUSD * p.qtd;
+        const cat = CATEGORIES.find(c => c.id === p.categoria) || CATEGORIES[5];
+
+        return (
+          <ItemCard key={p.id} icon={cat.icon} color={cat.color} title={p.nome} subtitle={`${p.local || 'Local não definido'} · Qtd: ${p.qtd}`} valA={`$ ${p.valorUSD.toFixed(2)}`} valB={`Total: $ ${totalUSD.toFixed(2)}`} link={p.link} nota={p.nota} pwaImageKey={p.nome} onEdit={() => onEdit(p)} onDelete={() => onDelete(p.id)} />
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── TAB 1: ITENS LEGAIS ─────────────────────────────────────────────────────
+function ItensLegaisTab({ itensLegais, search, catFilter, lojaFilter, taxMultiplier, onEdit, onDelete }) {
+  const filtered = useMemo(() => {
+    return itensLegais.filter(i => {
+      const matchS = i.nome.toLowerCase().includes(search.toLowerCase()) || (i.local && i.local.toLowerCase().includes(search.toLowerCase()));
+      const matchC = catFilter === \"all\" || i.categoria === catFilter;
+      const matchL = lojaFilter === \"all\" || i.local === lojaFilter;
+      return matchS && matchC && matchL;
+    });
+  }, [itensLegais, search, catFilter, lojaFilter]);
+
+  if (!filtered.length) return <EmptyState text=\"Nenhum item legal cadastrado.\" />;
+
+  return (
+    <div style={{ display: \"flex\", flexDirection: \"column\", gap: 12 }}>
+      {filtered.map(i => {
+        const costUSD = i.categoria === \"compras\" ? i.valorUSD * taxMultiplier : i.valorUSD;
+        const totalUSD = costUSD * i.qtd;
+        const cat = CATEGORIES.find(c => c.id === i.categoria) || CATEGORIES[5];
+
+        return (
+          <ItemCard key={i.id} icon={cat.icon} color={cat.color} title={i.nome} subtitle={`${i.local || 'Local'} · Qtd: ${i.qtd}`} valA={`$ ${i.valorUSD.toFixed(2)}`} valB={`Total: $ ${totalUSD.toFixed(2)}`} link={i.link} nota={i.nota} onEdit={() => onEdit(i)} onDelete={() => onDelete(i.id)} />
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── TAB 2: GASTOS DIÁRIOS ────────────────────────────────────────────────────
+function GastosTab({ gastos, search, catFilter, lojaFilter, onEdit, onDelete }) {
+  const filtered = useMemo(() => {
+    return gastos.filter(g => {
+      const matchS = g.nome.toLowerCase().includes(search.toLowerCase()) || (g.local && g.local.toLowerCase().includes(search.toLowerCase()));
+      const matchC = catFilter === \"all\" || g.categoria === catFilter;
+      const matchL = lojaFilter === \"all\" || g.local === lojaFilter;
+      return matchS && matchC && matchL;
+    });
+  }, [gastos, search, catFilter, lojaFilter]);
+
+  if (!filtered.length) return <EmptyState text=\"Nenhum gasto diário inserido.\" />;
+
+  return (
+    <div style={{ display: \"flex\", flexDirection: \"column\", gap: 12 }}>
+      {filtered.map(g => {
+        const cat = CATEGORIES.find(c => c.id === g.categoria) || CATEGORIES[5];
+        const partsText = g.pessoas && g.pessoas.length > 0 
+          ? `Dividido: ${g.pessoas.map(p => p.valorCustom ? `${p.nome} ($${p.valorCustom})` : p.nome).join(', ')}`
+          : "Individual (Você)";
+
+        return (
+          <ItemCard key={g.id} icon={cat.icon} color={cat.color} title={g.nome} subtitle={`${g.local || 'Gasto'} · ${partsText}`} valA={`$ ${g.valorUSD.toFixed(2)}`} valB=\"\" nota={g.nota} onEdit={() => onEdit(g)} onDelete={() => onDelete(g.id)} />
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── TAB 4: PARCELAS (NOVA ABA PLANILHA EDITÁVEL) ───────────────────────────
+function ParcelasTab({ parcelas, loading, onSave, onDelete }) {
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [editingParcela, setEditingParcela] = useState(null);
+
+  const monthlyTotal = useMemo(() => {
+    return parcelas.reduce((acc, curr) => acc + (parseFloat(curr.valorParcela) || 0), 0);
+  }, [parcelas]);
+
+  const grandRemainingTotal = useMemo(() => {
+    return parcelas.reduce((acc, curr) => {
+      const total = parseFloat(curr.valorTotal) || 0;
+      const qtd = parseInt(curr.qtdParcelas) || 1;
+      const vParc = parseFloat(curr.valorParcela) || 0;
+      const paidCount = Array.isArray(curr.statusMeses) ? curr.statusMeses.filter(Boolean).length : 0;
+      const remaining = Math.max(0, total - (paidCount * vParc));
+      return acc + remaining;
+    }, 0);
+  }, [parcelas]);
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: 40 }}>
+        <div style={{ width: 30, height: 30, border: `3px solid ${C.border}`, borderTopColor: C.primary, borderRadius: "50%", animation: "spin 1s linear infinite", margin: "0 auto 10px" }} />
+        <p style={{ color: C.textMid, fontSize: 13 }}>Carregando parcelas em tempo real...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, background: C.bgCard, padding: 16, borderRadius: 16, border: `1px solid ${C.border}` }}>
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: C.textLight }}>COMPROMISSO MENSAL</span>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.text, marginTop: 2 }}>R$ {monthlyTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+        </div>
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: C.textLight }}>RESTANTE TOTAL</span>
+          <div style={{ fontSize: 18, fontWeight: 800, color: C.purple, marginTop: 2 }}>R$ {grandRemainingTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: C.textMid }}>Tabela de Parcelas</h3>
+        <button onClick={() => { setEditingParcela(null); setIsFormOpen(true); }} style={{ background: C.primaryLight, color: C.primary, border: "none", padding: "6px 12px", borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+          ＋ Nova Parcela
+        </button>
+      </div>
+
+      {!parcelas.length ? (
+        <EmptyState text="Nenhuma parcela cadastrada na nuvem." />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {parcelas.map(p => (
+            <ParcelaCard key={p.id} parcela={p} onEdit={(item) => { setEditingParcela(item); setIsFormOpen(true); }} onDelete={onDelete} onToggleMonth={(item) => onSave(item)} />
           ))}
         </div>
+      )}
+
+      {isFormOpen && (
+        <FormModal type="parcela" item={editingParcela} onSave={(item) => { onSave(item); setIsFormOpen(false); }} onClose={() => setIsFormOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+function ParcelaCard({ parcela, onEdit, onDelete, onToggleMonth }) {
+  const [expanded, setExpanded] = useState(false);
+  const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  
+  const statusMeses = Array.isArray(parcela.statusMeses) ? parcela.statusMeses : Array(12).fill(false);
+  const paidCount = statusMeses.filter(Boolean).length;
+  const totalQty = parseInt(parcela.qtdParcelas) || 1;
+  const isFullyPaid = paidCount >= totalQty;
+
+  const handleMonthClick = (idx) => {
+    const nextStatus = [...statusMeses];
+    nextStatus[idx] = !nextStatus[idx];
+    onToggleMonth({ ...parcela, statusMeses: nextStatus });
+  };
+
+  return (
+    <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }} onClick={() => setExpanded(!expanded)}>
+        <div style={{ flex: 1, cursor: "pointer" }}>
+          <h4 style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{parcela.descricao}</h4>
+          <span style={{ fontSize: 11, color: C.textLight, display: "block", marginTop: 2 }}>
+            💳 {parcela.cartao || "Não inf."} · {parcela.qtdParcelas}x de R$ {parseFloat(parcela.valorParcela || 0).toFixed(2)}
+          </span>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <span style={{ fontSize: 14, fontWeight: 800, color: C.text }}>R$ {parseFloat(parcela.valorTotal || 0).toFixed(2)}</span>
+          <span style={{ display: "block", fontSize: 10, fontWeight: 700, color: isFullyPaid ? C.success : C.warning, marginTop: 4, background: isFullyPaid ? C.successLight : C.warningLight, padding: "2px 6px", borderRadius: 6 }}>
+            {isFullyPaid ? "Pago" : `${paidCount}/${totalQty} Meses`}
+          </span>
+        </div>
       </div>
 
-      {/* Dólar levando */}
-      <div style={{...S.card,background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:`1px solid ${C.success}33`}}>
-        <div style={{fontSize:12,fontWeight:600,color:C.success,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💵 Dólares na viagem</div>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
+      <div style={{ width: "100%", background: C.borderLight, height: 6, borderRadius: 3, overflow: "hidden" }}>
+        <div style={{ width: `${Math.min(100, (paidCount / totalQty) * 100)}%`, background: isFullyPaid ? C.success : C.primary, height: "100%", borderRadius: 3, transition: "width 0.3s" }} />
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${C.borderLight}`, paddingTop: 10, marginTop: 4, display: "flex", flexDirection: "column", gap: 12 }}>
           <div>
-            <div style={{fontSize:28,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>US$ {stats.valorTotalUSD.toFixed(2)}</div>
-            <div style={{fontSize:13,color:C.textMid,marginTop:2}}>planejado para compras</div>
-          </div>
-          <div style={{textAlign:"right"}}>
-            <div style={{fontSize:16,fontWeight:700,color:usdRestante>=0?C.textMid:C.danger,fontFamily:"'DM Mono',monospace"}}>
-              {usdRestante>=0?"Sobra":"Falta"} US${Math.abs(usdRestante).toFixed(2)}
-            </div>
-            <div style={{fontSize:12,color:C.textLight}}>de US$ {settings.totalDolarViagem} total</div>
-          </div>
-        </div>
-        <div style={{height:6,background:"#D1FAE5",borderRadius:999,overflow:"hidden",marginTop:12}}>
-          <div style={{width:`${Math.min(100,(stats.valorTotalUSD/settings.totalDolarViagem)*100)}%`,height:"100%",background:C.success,borderRadius:999}}/>
-        </div>
-      </div>
-
-      {/* 4 mini cards */}
-      <div style={S.grid4}>
-        {[{label:"Produtos",value:stats.total,color:C.primary},{label:"Comprados",value:stats.comprados,color:C.success},{label:"Pendentes",value:stats.pendentes,color:C.warning},{label:"Lojas",value:stats.lojas,color:C.purple}].map(({label,value,color})=>(
-          <div key={label} style={{...S.card,padding:"12px 8px",textAlign:"center",flex:1,marginBottom:0}}>
-            <div style={{fontSize:20,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{value}</div>
-            <div style={{fontSize:10,color:C.textLight,marginTop:2,fontWeight:500}}>{label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Meus gastos reais */}
-      <div style={{...S.card,background:"linear-gradient(135deg,#FFF7ED,#FFFBEB)",border:`1px solid ${C.warning}33`}}>
-        <div style={{fontSize:12,fontWeight:600,color:C.warning,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💸 Meus gastos reais</div>
-        <div style={{fontSize:26,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>US$ {stats.totalMeusGastosUSD.toFixed(2)}</div>
-        <div style={{fontSize:13,color:C.textMid,marginTop:2}}>≈ R$ {(stats.totalMeusGastosUSD*settings.dollarPago).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})} · apenas minha parte</div>
-      </div>
-
-      {/* Progresso + peso */}
-      <div style={{...S.card,display:"flex",alignItems:"center",gap:20}}>
-        <div style={{position:"relative",width:70,height:70,flexShrink:0}}>
-          <svg width="70" height="70" viewBox="0 0 70 70">
-            <circle cx="35" cy="35" r="27" fill="none" stroke={C.borderLight} strokeWidth="7"/>
-            <circle cx="35" cy="35" r="27" fill="none" stroke={C.primary} strokeWidth="7" strokeDasharray={`${2*Math.PI*27}`} strokeDashoffset={`${2*Math.PI*27*(1-pct/100)}`} strokeLinecap="round" transform="rotate(-90 35 35)" style={{transition:"stroke-dashoffset 0.6s ease"}}/>
-          </svg>
-          <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
-          </div>
-        </div>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:3}}>Progresso de compras</div>
-          <div style={{fontSize:12,color:C.textMid,marginBottom:8}}>{stats.comprados}/{stats.total} itens comprados</div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-            <span style={{fontSize:11,color:C.textLight}}>⚖ Peso: {(stats.pesoTotal/1000).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}kg / {(settings.pesoMax/1000).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}kg</span>
-            <span style={{fontSize:11,color:pesoColor,fontWeight:700}}>{pesoPercent.toFixed(0)}%</span>
-          </div>
-          <div style={{height:5,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
-            <div style={{width:`${pesoPercent}%`,height:"100%",background:pesoColor,borderRadius:999}}/>
-          </div>
-        </div>
-      </div>
-
-      {/* Financeiro */}
-      <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>💰 Resumo financeiro</div>
-        {[{label:"USD total planejado",value:`US$ ${stats.valorTotalUSD.toFixed(2)}`,color:C.primary},{label:"BRL previsto (c/ taxas)",value:`R$ ${stats.valorTotalBRL.toFixed(2)}`,color:C.text},{label:"BRL já gasto",value:`R$ ${stats.valorGasto.toFixed(2)}`,color:C.success},{label:"Meus gastos (USD)",value:`US$ ${stats.totalMeusGastosUSD.toFixed(2)}`,color:C.warning}].map(({label,value,color})=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-            <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-            <span style={{fontSize:14,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
-          </div>
-        ))}
-      </div>
-      {pesoPercent>=80&&<div style={{background:pesoBg,border:`1px solid ${pesoColor}33`,borderRadius:12,padding:"10px 14px",fontSize:13,color:pesoColor,fontWeight:600,marginBottom:12}}>⚠ Peso da mala em {pesoPercent.toFixed(0)}% do limite!</div>}
-    </div>
-  );
-}
-
-// ─── GASTOS TAB ───────────────────────────────────────────────────────────────
-function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,onToggleStatus}) {
-  const [filtro,setFiltro]=useState("todos");
-
-  const totalUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g),0);
-  const aReceberUSD=gastos.reduce((a,g)=>{
-    if(!g.divisao||g.divisao.length===0) return a;
-    const part=(parseFloat(g.usd)||0)/(1+g.divisao.length);
-    return a+g.divisao.filter(p=>!p.pago).length*part;
-  },0);
-
-  const filtrados=gastos.filter(g=>{
-    if(filtro==="compras") return g.tipo==="produto";
-    if(filtro==="livres") return g.tipo!=="produto";
-    return true;
-  }).sort((a,b)=>(b.id||0)-(a.id||0));
-
-  return (
-    <div style={S.page}>
-      {/* Resumo topo */}
-      <div style={S.heroCard}>
-        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:4}}>Meus gastos totais</div>
-        <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>US$ {totalUSD.toFixed(2)}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.65)",marginTop:4}}>≈ R$ {(totalUSD*settings.dollarPago).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <div style={{display:"flex",gap:12,marginTop:12}}>
-          <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 14px",flex:1,textAlign:"center"}}>
-            <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginBottom:2}}>A receber</div>
-            <div style={{fontSize:15,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>US$ {aReceberUSD.toFixed(2)}</div>
-          </div>
-          <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 14px",flex:1,textAlign:"center"}}>
-            <div style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginBottom:2}}>Gastos</div>
-            <div style={{fontSize:15,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{gastos.length}</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Filtros */}
-      <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
-        {[["todos","Todos"],["compras","🛍 Compras"],["livres","✏ Manuais"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"8px 4px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:filtro===v?C.bgCard:"transparent",color:filtro===v?C.primary:C.textMid,boxShadow:filtro===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setFiltro(v)}>{l}</button>
-        ))}
-      </div>
-
-      {filtrados.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente."/>}
-
-      {filtrados.map(g=><GastoCard key={g.id} g={g} settings={settings} onEdit={()=>onEdit(g)} onDelete={()=>onDelete(g.id)} onTogglePago={onTogglePago}/>)}
-    </div>
-  );
-}
-
-function GastoCard({g,settings,onEdit,onDelete,onTogglePago}) {
-  const [expanded,setExpanded]=useState(false);
-  const totalUSD=parseFloat(g.usd)||0;
-  const minhaUSD=calcMinhaParteUSD(g);
-  const minhaBRL=usdToBRL(minhaUSD,g,settings);
-  const totalBRL=usdToBRL(totalUSD,g,settings);
-  const cotUsada=parseFloat(g.dolarPago)||settings.dollarPago;
-  const temDivisao=g.divisao&&g.divisao.length>0;
-  const totalPessoas=temDivisao?1+g.divisao.length:1;
-  const aReceberUSD=temDivisao?g.divisao.filter(p=>!p.pago).length*(totalUSD/totalPessoas):0;
-
-  return (
-    <div style={{...S.card,marginBottom:10}}>
-      <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
-        <div style={{width:40,height:40,borderRadius:12,background:g.tipo==="produto"?C.primaryLight:C.purpleLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>
-          {LOJA_EMOJI[g.loja]||g.categoria?.split(" ")[0]||"💳"}
-        </div>
-        <div style={{flex:1}} onClick={()=>setExpanded(e=>!e)}>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8}}>
-            <div>
-              <div style={{fontWeight:600,fontSize:14,color:C.text,lineHeight:1.3}}>{g.descricao}</div>
-              <div style={{fontSize:12,color:C.textLight,marginTop:2}}>{g.loja||g.categoria} · {g.data}</div>
-            </div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:15,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US$ {minhaUSD.toFixed(2)}</div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>≈ R$ {minhaBRL.toFixed(2)}</div>
-              {temDivisao&&<div style={{fontSize:11,color:C.textLight}}>de US$ {totalUSD.toFixed(2)} total</div>}
-            </div>
-          </div>
-          {temDivisao&&(
-            <div style={{display:"flex",gap:4,marginTop:8,flexWrap:"wrap"}}>
-              {g.divisao.map((p,i)=>(
-                <button key={i} onClick={e=>{e.stopPropagation();onTogglePago(g.id,i);}}
-                  style={{display:"flex",alignItems:"center",gap:4,background:p.pago?C.successLight:C.dangerLight,border:`1px solid ${p.pago?C.success:C.danger}33`,borderRadius:999,padding:"3px 8px",fontSize:11,fontWeight:600,color:p.pago?C.success:C.danger,cursor:"pointer"}}>
-                  {p.pago?"✓":"○"} {p.nome}
+            <span style={{ fontSize: 11, fontWeight: 600, color: C.textLight, display: \"block\", marginBottom: 6 }}>CONTROLE MENSAL DA PLANILHA (PAGO/PENDENTE):</span>
+            <div style={{ display: \"grid\", gridTemplateColumns: \"repeat(4, 1fr)\", gap: 6 }}>
+              {MESES.map((mes, i) => (
+                <button key={mes} onClick={() => handleMonthClick(i)} style={{ padding: \"6px 2px\", borderRadius: 8, border: `1px solid ${statusMeses[i] ? C.success : C.border}`, background: statusMeses[i] ? C.successLight : \"none\", color: statusMeses[i] ? C.success : C.textMid, fontSize: 11, fontWeight: 600, cursor: \"pointer\" }}>
+                  {mes} {statusMeses[i] ? \"✅\" : \"\"}
                 </button>
               ))}
-              {aReceberUSD>0&&<span style={{...S.tag,background:C.warningLight,color:C.warning,borderColor:C.warning+"33",fontSize:11}}>A receber US$ {aReceberUSD.toFixed(2)}</span>}
             </div>
-          )}
+          </div>
+          <div style={{ display: \"flex\", justifyContent: \"flex-end\", gap: 8 }}>
+            <button onClick={() => onEdit(parcela)} style={{ background: \"none\", border: `1px solid ${C.border}`, padding: \"6px 12px\", borderRadius: 8, fontSize: 11, fontWeight: 600, color: C.textMid, cursor: \"pointer\" }}>Editar</button>
+            <button onClick={() => onDelete(parcela.id, \"parcela\")} style={{ background: \"none\", border: `1px solid ${C.danger}`, padding: \"6px 12px\", borderRadius: 8, fontSize: 11, fontWeight: 600, color: C.danger, cursor: \"pointer\" }}>Excluir</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TAB 3: RESUMO DE QUEM DEVE QUEM ─────────────────────────────────────────
+function ResumoTab({ produtos, itensLegais, gastos, settings, taxMultiplier }) {
+  const debits = useMemo(() => {
+    let enzoOwesPai = 0;
+    let paiOwesEnzo = 0;
+
+    // Calcular parcelas/compras se houvesse tags de divisão nos produtos, mas o foco solicitado foi na divisão unequal de Gastos Diários.
+    // Analisar coleção de gastos diários
+    gastos.forEach(g => {
+      const amt = g.valorUSD || 0;
+      if (!g.pessoas || g.pessoas.length === 0) return; // individual do enzo
+
+      // Descobrir se há valor customizado preenchido
+      const hasCustom = g.pessoas.some(p => p.valorCustom !== undefined && p.valorCustom !== \"\");
+
+      if (hasCustom) {
+        g.pessoas.forEach(p => {
+          const valCustom = parseFloat(p.valorCustom) || 0;
+          if (p.nome === \"Pai\") enzoOwesPai += valCustom;
+          if (p.nome === \"Mãe\") enzoOwesPai += valCustom; // se houver outra pessoa
+        });
+      } else {
+        // Divisão padrão igual
+        const share = amt / (g.pessoas.length + 1);
+        g.pessoas.forEach(p => {
+          if (p.nome === \"Pai\") enzoOwesPai += share;
+        });
+      }
+    });
+
+    const netUSD = enzoOwesPai - paiOwesEnzo;
+    const netBRL = netUSD * settings.exchangeRate;
+
+    return { enzoOwesPai, paiOwesEnzo, netUSD, netBRL };
+  }, [gastos, settings.exchangeRate]);
+
+  return (
+    <div style={{ display: \"flex\", flexDirection: \"column\", gap: 16 }}>
+      <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 16, textAlign: \"center\" }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: C.textLight }}>SALDO DA DIVISÃO DE GASTOS</span>
+        <h2 style={{ fontSize: 24, fontWeight: 800, color: debits.netUSD >= 0 ? C.warning : C.success, margin: \"6px 0 2px\" }}>
+          USD {Math.abs(debits.netUSD).toFixed(2)}
+        </h2>
+        <span style={{ fontSize: 13, fontWeight: 600, color: C.textMid, display: \"block\" }}>
+          (R$ {Math.abs(debits.netBRL).toFixed(2)})
+        </span>
+        <p style={{ fontSize: 12, color: C.textLight, marginTop: 10, fontWeight: 500 }}>
+          {debits.netUSD > 0 ? \"Enzo deve repassar esse valor para o Pai.\" : debits.netUSD < 0 ? \"O Pai deve repassar esse valor para o Enzo.\" : \"Todos os gastos divididos estão quitados!\"}
+        </p>
+      </div>
+
+      <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 14 }}>
+        <h3 style={{ fontSize: 13, fontWeight: 700, color: C.textMid, marginBottom: 12 }}>Detalhamento por Integrante</h3>
+        <div style={{ display: \"flex\", flexDirection: \"column\", gap: 10 }}>
+          <div style={{ display: \"flex\", justifyContent: \"space-between\", paddingBottom: 8, borderBottom: `1px solid ${C.borderLight}` }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Gastos Cobertos pelo Pai</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>$ {debits.enzoOwesPai.toFixed(2)}</span>
+          </div>
+          <div style={{ display: \"flex\", justifyContent: \"space-between\", paddingBottom: 4 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: C.text }}>Gastos Cobertos pelo Enzo</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>$ {debits.paiOwesEnzo.toFixed(2)}</span>
+          </div>
         </div>
       </div>
-      {expanded&&(
-        <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[
-            {label:"Total USD",value:`US$ ${totalUSD.toFixed(2)}`,color:C.primary},
-            {label:"Minha parte USD",value:`US$ ${minhaUSD.toFixed(2)}`,color:C.primary},
-            {label:"Minha parte BRL",value:`R$ ${minhaBRL.toFixed(2)}`,color:C.textMid},
-            {label:"Cotação usada",value:`R$ ${cotUsada.toFixed(4)}`},
-            ...(temDivisao?[{label:"Dividido entre",value:`${totalPessoas} pessoas`}]:[]),
-          ].map(({label,value,color})=>(
-            <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-              <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-              <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
+    </div>
+  );
+}
+
+// ─── TAB 5: DASHBOARD CONTROLE ───────────────────────────────────────────────
+function DashboardTab({ produtos, itensLegais, gastos, taxMultiplier }) {
+  const chartData = useMemo(() => {
+    const sums = { compras: 0, alimentacao: 0, hospedagem: 0, transporte: 0, lazer: 0, outros: 0 };
+    
+    produtos.forEach(p => {
+      const v = (p.valorUSD || 0) * (p.qtd || 1);
+      sums[p.categoria || \"outros\"] += p.categoria === \"compras\" ? v * taxMultiplier : v;
+    });
+    itensLegais.forEach(i => {
+      const v = (i.valorUSD || 0) * (i.qtd || 1);
+      sums[i.categoria || \"outros\"] += i.categoria === \"compras\" ? v * taxMultiplier : v;
+    });
+    gastos.forEach(g => {
+      sums[g.categoria || \"outros\"] += (g.valorUSD || 0);
+    });
+
+    return Object.keys(sums).map(k => ({
+      id: k,
+      label: CAT_TRANSLATIONS[k] || k,
+      val: sums[k],
+      cat: CATEGORIES.find(c => c.id === k) || CATEGORIES[5]
+    })).filter(item => item.val > 0).sort((a,b) => b.val - a.val);
+  }, [produtos, itensLegais, gastos, taxMultiplier]);
+
+  const maxVal = chartData[0]?.val || 1;
+
+  if (!chartData.length) return <EmptyState text=\"Nenhum dado financeiro para gerar gráficos.\" />;
+
+  return (
+    <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 16 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text, marginBottom: 16 }}>Custos por Categoria (USD)</h3>
+      <div style={{ display: \"flex\", flexDirection: \"column\", gap: 14 }}>
+        {chartData.map(c => {
+          const pct = (c.val / maxVal) * 100;
+          return (
+            <div key={c.id}>
+              <div style={{ display: \"flex\", justifyContent: \"space-between\", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+                <span style={{ display: \"flex\", alignItems: \"center\", gap: 4 }}><span>{c.cat.icon}</span> {c.label}</span>
+                <span style={{ color: C.text }}>$ {c.val.toFixed(2)}</span>
+              </div>
+              <div style={{ width: \"100%\", background: C.borderLight, height: 8, borderRadius: 4, overflow: \"hidden\" }}>
+                <div style={{ width: `${pct}%`, background: c.cat.color, height: \"100%\", borderRadius: 4 }} />
+              </div>
             </div>
-          ))}
-          {temDivisao&&(
-            <>
-              <div style={{fontSize:12,fontWeight:600,color:C.textMid,marginTop:10,marginBottom:6}}>Status de pagamento:</div>
-              {g.divisao.map((p,i)=>(
-                <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-                  <span style={{fontSize:13,color:C.text}}>{p.nome}</span>
-                  <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    <span style={{fontSize:13,fontFamily:"'DM Mono',monospace",color:C.textMid}}>US$ {(totalUSD/totalPessoas).toFixed(2)}</span>
-                    <button onClick={()=>onTogglePago(g.id,i)} style={{background:p.pago?C.successLight:C.bg,border:`1px solid ${p.pago?C.success:C.border}`,borderRadius:8,padding:"3px 10px",fontSize:12,fontWeight:600,color:p.pago?C.success:C.textMid,cursor:"pointer"}}>
-                      {p.pago?"✓ Pago":"Pendente"}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── TAB 6: CALCULADORA COMPRAS ──────────────────────────────────────────────
+function CalculadoraTab({ settings, updateSettings }) {
+  const [calcVal, setCalcVal] = useState(\"\");
+  const taxMult = 1 + (settings.taxRate / 100);
+
+  const parsed = parseFloat(calcVal) || 0;
+  const resUSD = parsed * taxMult;
+  const resBRL = resUSD * settings.exchangeRate;
+
+  return (
+    <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 18, display: \"flex\", flexDirection: \"column\", gap: 14 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: C.text }}>Simulador de Imposto de Etiqueta</h3>
+      <div>
+        <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 5 }}>VALOR DA ETIQUETA (USD)</label>
+        <input type=\"number\" placeholder=\"$ 0.00\" value={calcVal} onChange={e => setCalcVal(e.target.value)} style={{ width: \"100%\", padding: 12, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 15, fontWeight: 700, outline: \"none\", boxSizing: \"border-box\" }} />
+      </div>
+
+      <div style={{ background: C.bg, padding: 14, borderRadius: 12, display: \"flex\", flexDirection: \"column\", gap: 8, border: `1px solid ${C.borderLight}` }}>
+        <div style={{ display: \"flex\", justifyContent: \"space-between\", fontSize: 13 }}>
+          <span style={{ color: C.textMid, fontWeight: 500 }}>Com Taxa Flórida (${settings.taxRate}%):</span>
+          <span style={{ fontWeight: 700, color: C.text }}>USD {resUSD.toFixed(2)}</span>
+        </div>
+        <div style={{ display: \"flex\", justifyContent: \"space-between\", fontSize: 14, borderTop: `1px solid ${C.borderLight}`, paddingTop: 8, marginTop: 2 }}>
+          <span style={{ color: C.primary, fontWeight: 700 }}>Total Convertido em Reais:</span>
+          <span style={{ fontWeight: 800, color: C.primary }}>R$ {resBRL.toFixed(2)}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── GENERIC UI CARD COMPONENT ────────────────────────────────────────────────
+function ItemCard({ icon, color, title, subtitle, valA, valB, link, nota, pwaImageKey, onEdit, onDelete }) {
+  const [expanded, setExpanded] = useState(false);
+  const [imgUrl, setImgUrl] = useState(null);
+
+  useEffect(() => {
+    if (pwaImageKey) {
+      if (imageCache[pwaImageKey]) {
+        setImgUrl(imageCache[pwaImageKey]);
+      } else {
+        getProductImage(pwaImageKey).then(url => {
+          if (url) setImgUrl(url);
+        });
+      }
+    }
+  }, [pwaImageKey]);
+
+  return (
+    <div style={{ background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}`, padding: 12, display: \"flex\", flexDirection: \"column\", gap: 8 }}>
+      <div style={{ display: \"flex\", alignItems: \"center\", gap: 10 }}>
+        {imgUrl ? (
+          <img src={imgUrl} alt=\"\" style={{ width: 42, height: 42, borderRadius: 10, objectFit: \"cover\", border: `1px solid ${C.borderLight}` }} onClick={() => setExpanded(!expanded)} />
+        ) : (
+          <div style={{ width: 42, height: 42, borderRadius: 10, background: color + \"15\", display: \"flex\", alignItems: \"center\", justifyContent: \"center\", fontSize: 20, color }} onClick={() => setExpanded(!expanded)}>
+            {icon}
+          </div>
+        )}
+
+        <div style={{ flex: 1, minWidth: 0, cursor: \"pointer\" }} onClick={() => setExpanded(!expanded)}>
+          <h4 style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: \"hidden\", textOverflow: \"ellipsis\", whiteSpace: \"nowrap\" }}>{title}</h4>
+          <span style={{ fontSize: 11, color: C.textLight, overflow: \"hidden\", textOverflow: \"ellipsis\", whiteSpace: \"nowrap\", display: \"block\" }}>{subtitle}</span>
+        </div>
+
+        <div style={{ textAlign: \"right\", minWidth: 70, cursor: \"pointer\" }} onClick={() => setExpanded(!expanded)}>
+          <span style={{ fontSize: 13, fontWeight: 800, color: C.text, display: \"block\" }}>{valA}</span>
+          {valB && <span style={{ fontSize: 10, fontWeight: 600, color: C.textLight, display: \"block\", marginTop: 2 }}>{valB}</span>}
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${C.borderLight}`, paddingTop: 10, display: \"flex\", flexDirection: \"column\", gap: 8, marginTop: 2 }}>
+          {nota && <p style={{ fontSize: 11, color: C.textMid, background: C.bg, padding: 8, borderRadius: 8, borderLeft: `3px solid ${color}` }}>{nota}</p>}
+          <div style={{ display: \"flex\", justifyContent: \"space-between\", alignItems: \"center\" }}>
+            {link ? (
+              <a href={link} target=\"_blank\" rel=\"noreferrer\" style={{ fontSize: 11, color: C.primary, fontWeight: 600, textDecoration: \"none\" }}>🌐 Ver Link Oficial</a>
+            ) : <span />}
+            <div style={{ display: \"flex\", gap: 6 }}>
+              <button onClick={onEdit} style={{ background: \"none\", border: `1px solid ${C.border}`, padding: \"5px 10px\", borderRadius: 8, fontSize: 11, fontWeight: 600, color: C.textMid, cursor: \"pointer\" }}>Editar</button>
+              <button onClick={onDelete} style={{ background: \"none\", border: `1px solid ${C.danger}`, padding: \"5px 10px\", borderRadius: 8, fontSize: 11, fontWeight: 600, color: C.danger, cursor: \"pointer\" }}>Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmptyState({ text }) {
+  return (
+    <div style={{ textAlign: \"center\", padding: \"32px 16px\", background: C.bgCard, borderRadius: 16, border: `1px solid ${C.border}` }}>
+      <span style={{ fontSize: 24, display: \"block\", marginBottom: 6 }}>🍃</span>
+      <p style={{ fontSize: 12, fontWeight: 500, color: C.textLight }}>{text}</p>
+    </div>
+  );
+}
+
+// ─── FULL MODAL WINDOW IMPLEMENTATION ─────────────────────────────────────────
+function FormModal({ type, item, onSave, onClose }) {
+  // Common Fields
+  const [nome, setNome] = useState(item?.nome || \"\");
+  const [local, setLocal] = useState(item?.local || \"\");
+  const [valorUSD, setValorUSD] = useState(item?.valorUSD || \"\");
+  const [qtd, setQtd] = useState(item?.qtd || 1);
+  const [categoria, setCategoria] = useState(item?.categoria || \"compras\");
+  const [link, setLink] = useState(item?.link || \"\");
+  const [nota, setNota] = useState(item?.nota || \"\");
+
+  // Gasto Integrantes Selection with Custom Unequal Splits
+  const [gastoPessoas, setGastoPessoas] = useState(item?.pessoas || []);
+
+  // Parcela Specific Fields
+  const [descParcela, setDescParcela] = useState(item?.descricao || \"\");
+  const [valTotalParcela, setValTotalParcela] = useState(item?.valorTotal || \"\");
+  const [qtyParcelas, setQtyParcelas] = useState(item?.qtdParcelas || \"\");
+  const [valParcela, setValParcela] = useState(item?.valorParcela || \"\");
+  const [cardUsed, setCardUsed] = useState(item?.cartao || \"\");
+
+  // Auto compute installment values for Parcela Form
+  useEffect(() => {
+    if (type === \"parcela\") {
+      const tot = parseFloat(valTotalParcela) || 0;
+      const qty = parseInt(qtyParcelas) || 1;
+      if (tot > 0 && qty > 0) {
+        setValParcela((tot / qty).toFixed(2));
+      }
+    }
+  }, [valTotalParcela, qtyParcelas, type]);
+
+  const handleTogglePessoa = (name) => {
+    const exists = gastoPessoas.some(p => p.nome === name);
+    if (exists) {
+      const next = gastoPessoas.filter(p => p.nome !== name);
+      // Redividir igualmente de forma automática ao remover
+      const baseShare = (parseFloat(valorUSD) || 0) / (next.length + 1);
+      setGastoPessoas(next.map(p => ({ ...p, valorCustom: baseShare.toFixed(2) })));
+    } else {
+      const next = [...gastoPessoas, { nome: name, valorCustom: \"\" }];
+      // Redividir igualmente de forma automática ao adicionar
+      const baseShare = (parseFloat(valorUSD) || 0) / (next.length + 1);
+      setGastoPessoas(next.map(p => ({ ...p, valorCustom: baseShare.toFixed(2) })));
+    }
+  };
+
+  const handleUpdateGastoCustomValue = (index, val) => {
+    const next = [...gastoPessoas];
+    next[index].valorCustom = val;
+    setGastoPessoas(next);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+    if (type === \"parcela\") {
+      if (!descParcela || !valTotalParcela) return alert(\"Preencha descrição e valor total!\");
+      onSave({
+        id: item?.id,
+        descricao: descParcela,
+        valorTotal: parseFloat(valTotalParcela),
+        qtdParcelas: parseInt(qtyParcelas) || 1,
+        valorParcela: parseFloat(valParcela),
+        cartao: cardUsed,
+        statusMeses: item?.statusMeses || Array(12).fill(false)
+      });
+      return;
+    }
+
+    if (!nome || !valorUSD) return alert(\"Preencha o nome e o valor!\");
+
+    const payload = {
+      id: item?.id,
+      nome,
+      local,
+      valorUSD: parseFloat(valorUSD),
+      categoria,
+      nota,
+      ...(type !== \"gasto\" ? { qtd: parseInt(qtd) || 1, link } : { pessoas: gastoPessoas })
+    };
+    onSave(payload);
+  };
+
+  const titleText = item ? `Editar ${type}` : `Novo ${type === 'itemLegal' ? 'Item Legal' : type}`;
+
+  return (
+    <div style={{ position: \"fixed\", top: 0, left: 0, right: 0, bottom: 0, background: \"rgba(15,23,42,0.4)\", backdropFilter: \"blur(4px)\", display: \"flex\", alignItems: \"flex-end\", zIndex: 200 }}>
+      <form onSubmit={submit} style={{ background: C.bgCard, width: \"100%\", maxHeigh: \"90vh\", overflowY: \"auto\", borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, boxShadow: \"0 -10px 25px rgba(0,0,0,0.1)\", display: \"flex\", flexDirection: \"column\", gap: 12 }}>
+        <div style={{ display: \"flex\", justifyContent: \"space-between\", alignItems: \"center\", paddingBottom: 4 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 800, color: C.text, textTransform: \"capitalize\" }}>{titleText}</h3>
+          <button type=\"button\" onClick={onClose} style={{ background: C.borderLight, border: \"none\", width: 28, height: 28, borderRadius: \"50%\", fontSize: 12, fontWeight: 700, color: C.textMid, cursor: \"pointer\" }}>✕</button>
+        </div>
+
+        {type === \"parcela\" ? (
+          <>
+            <div>
+              <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>DESCRIÇÃO COMPRA</label>
+              <input type=\"text\" value={descParcela} onChange={e => setDescParcela(e.target.value)} placeholder=\"Ex: PASSAGEM, CASA, UNIVERSAL\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+            </div>
+            <div style={{ display: \"grid\", gridTemplateColumns: \"1fr 1fr\", gap: 10 }}>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>TOTAL COMPRA (R$)</label>
+                <input type=\"number\" step=\"0.01\" value={valTotalParcela} onChange={e => setValTotalParcela(e.target.value)} placeholder=\"5134.21\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+              </div>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>QTD PARCELAS</label>
+                <input type=\"number\" value={qtyParcelas} onChange={e => setQtyParcelas(e.target.value)} placeholder=\"4\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+              </div>
+            </div>
+            <div style={{ display: \"grid\", gridTemplateColumns: \"1fr 1fr\", gap: 10 }}>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>VALOR PARCELA (R$)</label>
+                <input type=\"number\" step=\"0.01\" value={valParcela} onChange={e => setValParcela(e.target.value)} style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\", background: C.bg }} readOnly />
+              </div>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>CARTÃO / BANCO</label>
+                <input type=\"text\" value={cardUsed} onChange={e => setCardUsed(e.target.value)} placeholder=\"Ex: Itaú Personalité\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>NOME / IDENTIFICAÇÃO</label>
+              <input type=\"text\" value={nome} onChange={e => setNome(e.target.value)} placeholder=\"Ex: Tênis Nike, Almoço, Gasolina\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+            </div>
+
+            <div style={{ display: \"grid\", gridTemplateColumns: \"2fr 1fr\", gap: 10 }}>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>LOJA / LOCAL</label>
+                <input type=\"text\" value={local} onChange={e => setLocal(e.target.value)} placeholder=\"Ex: Walmart, Target\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+              </div>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>VALOR (USD)</label>
+                <input type=\"number\" step=\"0.01\" value={valorUSD} onChange={e => {
+                  setValorUSD(e.target.value);
+                  // Atualizar divisão igualitária ao redefinir o valor base
+                  if (type === \"gasto\" && gastoPessoas.length > 0) {
+                    const share = (parseFloat(e.target.value) || 0) / (gastoPessoas.length + 1);
+                    setGastoPessoas(gastoPessoas.map(p => ({ ...p, valorCustom: share.toFixed(2) })));
+                  }
+                }} placeholder=\"0.00\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, fontWeight: 700, outline: \"none\", boxSizing: \"border-box\" }} />
+              </div>
+            </div>
+
+            <div style={{ display: \"grid\", gridTemplateColumns: \"1fr 1fr\", gap: 10 }}>
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>CATEGORIA</label>
+                <select value={categoria} onChange={e => setCategoria(e.target.value)} style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, background: C.bgCard, fontSize: 13, outline: \"none\" }}>
+                  {CATEGORIES.map(c => <option key={c.id} value={c.id}>{c.icon} {c.label}</option>)}
+                </select>
+              </div>
+              {type !== \"gasto\" ? (
+                <div>
+                  <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>QUANTIDADE</label>
+                  <input type=\"number\" value={qtd} onChange={e => setQtd(e.target.value)} style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+                </div>
+              ) : (
+                <div style={{ display: \"flex\", flexDirection: \"column\", justifyContent: \"flex-end\" }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: C.textLight, marginBottom: 2 }}>DIVISÃO DE GASTOS:</span>
+                  <div style={{ display: \"flex\", gap: 8 }}>
+                    <button type=\"button\" onClick={() => handleTogglePessoa(\"Pai\")} style={{ flex: 1, padding: 8, borderRadius: 8, border: `1px solid ${gastoPessoas.some(p=>p.nome===\"Pai\") ? C.primary : C.border}`, background: gastoPessoas.some(p=>p.nome===\"Pai\") ? C.primaryLight : \"none\", color: gastoPessoas.some(p=>p.nome===\"Pai\") ? C.primary : C.textMid, fontSize: 12, fontWeight: 700, cursor: \"pointer\" }}>
+                      👨🏻 Pai
                     </button>
                   </div>
                 </div>
-              ))}
-            </>
-          )}
-          {g.tipo!=="produto"&&(
-            <div style={{display:"flex",gap:8,marginTop:12}}>
-              <button style={S.btnOutline} onClick={onEdit}>✏ Editar</button>
-              <button style={{...S.btnOutline,color:C.danger,borderColor:C.danger+"44"}} onClick={onDelete}>🗑 Remover</button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── GASTO FORM ───────────────────────────────────────────────────────────────
-function GastoForm({gasto,settings,onSave,onClose}) {
-  const cotacaoUsada = gasto?.dolarPago || settings.dollarPago;
-  const empty={descricao:"",loja:"",usd:"",dolarPago:settings.dollarPago,categoria:"🍔 Alimentação",divisao:[],data:new Date().toLocaleDateString("pt-BR")};
-  const [f,setF]=useState(gasto?{...gasto,usd:(gasto.usd||"").toString(),dolarPago:gasto.dolarPago||settings.dollarPago}:empty);
-  const [novaPessoa,setNovaPessoa]=useState("");
-
-  const totalUSD=parseFloat(f.usd)||0;
-  const cotacao=parseFloat(f.dolarPago)||settings.dollarPago;
-  const totalBRL=totalUSD*cotacao;
-  const nPessoas=1+f.divisao.length;
-  const minhaParteUSD=nPessoas>0?totalUSD/nPessoas:totalUSD;
-  const minhaParteBRL=minhaParteUSD*cotacao;
-
-  function addPessoa(){if(!novaPessoa.trim())return;setF(p=>({...p,divisao:[...p.divisao,{nome:novaPessoa.trim(),pago:false}]}));setNovaPessoa("");}
-  function removePessoa(i){setF(p=>({...p,divisao:p.divisao.filter((_,idx)=>idx!==i)}));}
-
-  function handleSave(){
-    if(!f.descricao)return alert("Informe a descrição");
-    if(!f.usd)return alert("Informe o valor em USD");
-    onSave({...f,usd:parseFloat(f.usd),brl:null,dolarPago:f.dolarPago||settings.dollarPago,tipo:"livre"});
-  }
-
-  return (
-    <Modal title={gasto?.id?"Editar gasto":"Novo gasto"} onClose={onClose}>
-      <label style={S.label}>Descrição *</label>
-      <input style={S.input} placeholder="Ex: Almoço no McDonald's" value={f.descricao} onChange={e=>setF(p=>({...p,descricao:e.target.value}))}/>
-      <label style={S.label}>Categoria</label>
-      <select style={S.input} value={f.categoria} onChange={e=>setF(p=>({...p,categoria:e.target.value}))}>
-        {CATEGORIAS_GASTO.map(c=><option key={c}>{c}</option>)}
-      </select>
-      <label style={S.label}>Local / Loja (opcional)</label>
-      <input style={S.input} placeholder="Ex: McDonald's International Drive" value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
-      <label style={S.label}>Valor em USD *</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Ex: 45.90" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
-      <div style={{background:C.primaryLight,border:`1px solid ${C.primary}22`,borderRadius:9,padding:"8px 12px",fontSize:12,color:C.textMid,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>R$ {(parseFloat(f.dolarPago)||settings.dollarPago).toFixed(4)}</strong></span>
-        <span style={{color:C.textLight,fontSize:11}}>automática das configurações</span>
-      </div>
-      <label style={S.label}>Data</label>
-      <input style={S.input} placeholder="DD/MM/AAAA" value={f.data} onChange={e=>setF(p=>({...p,data:e.target.value}))}/>
-
-      {/* Preview valor */}
-      {totalUSD>0&&(
-        <div style={{background:C.primaryLight,borderRadius:10,padding:"10px 14px",marginBottom:14}}>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-            <span style={{fontSize:13,color:C.textMid}}>Total USD</span>
-            <span style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US$ {totalUSD.toFixed(2)}</span>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-            <span style={{fontSize:13,color:C.textMid}}>≈ Total BRL</span>
-            <span style={{fontSize:13,fontWeight:600,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>R$ {totalBRL.toFixed(2)}</span>
-          </div>
-          <div style={{display:"flex",justifyContent:"space-between"}}>
-            <span style={{fontSize:13,color:C.textMid}}>Minha parte ({nPessoas}p)</span>
-            <span style={{fontSize:14,fontWeight:700,color:C.success,fontFamily:"'DM Mono',monospace"}}>US$ {minhaParteUSD.toFixed(2)} · R$ {minhaParteBRL.toFixed(2)}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Divisão de pessoas */}
-      <div style={{borderTop:`1px solid ${C.borderLight}`,paddingTop:14,marginBottom:14}}>
-        <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:4}}>Dividir com outras pessoas</div>
-        <div style={{fontSize:12,color:C.textLight,marginBottom:10}}>Adicione quem vai dividir este gasto. O total será dividido igualmente entre você + as pessoas abaixo.</div>
-        <div style={{display:"flex",gap:8,marginBottom:8}}>
-          <input style={{...S.input,marginBottom:0,flex:1}} placeholder="Nome da pessoa" value={novaPessoa} onChange={e=>setNovaPessoa(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addPessoa()}/>
-          <button style={{...S.btnOutline,whiteSpace:"nowrap",color:C.primary,borderColor:C.primary+"44"}} onClick={addPessoa}>＋ Add</button>
-        </div>
-        {f.divisao.map((p,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:C.bg,borderRadius:10,marginBottom:6,border:`1px solid ${C.border}`}}>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <div style={{width:28,height:28,borderRadius:"50%",background:C.primaryLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:13,fontWeight:700,color:C.primary}}>{p.nome[0].toUpperCase()}</div>
-              <span style={{fontSize:13,fontWeight:600,color:C.text}}>{p.nome}</span>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:8}}>
-              {totalUSD>0&&<span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>US$ {(totalUSD/nPessoas).toFixed(2)}</span>}
-              <button onClick={()=>removePessoa(i)} style={{background:C.dangerLight,border:"none",borderRadius:6,width:22,height:22,cursor:"pointer",color:C.danger,fontSize:14}}>×</button>
-            </div>
-          </div>
-        ))}
-        {f.divisao.length>0&&(
-          <div style={{background:C.successLight,border:`1px solid ${C.success}33`,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.success,fontWeight:600}}>
-            ✓ Dividindo entre {nPessoas} pessoas · Sua parte: US$ {minhaParteUSD.toFixed(2)} · R$ {minhaParteBRL.toFixed(2)}
-          </div>
-        )}
-      </div>
-      <button style={S.btnPrimary} onClick={handleSave}>{gasto?.id?"Salvar alterações":"Adicionar gasto"}</button>
-    </Modal>
-  );
-}
-
-// ─── PRODUTOS TAB ─────────────────────────────────────────────────────────────
-function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onAdd,onMoveToList}) {
-  const [subTab,setSubTab]=useState("compras");
-  const [filterLoja,setFilterLoja]=useState("Todas");
-  const [filterStatus,setFilterStatus]=useState("Todos");
-  const [busca,setBusca]=useState("");
-  const lista=subTab==="legais"?itensLegais:produtos;
-  const filtered=useMemo(()=>lista.filter(p=>{
-    if(filterLoja!=="Todas"&&p.loja!==filterLoja)return false;
-    if(subTab!=="legais"&&filterStatus!=="Todos"&&p.status!==filterStatus)return false;
-    if(busca&&!p.nome.toLowerCase().includes(busca.toLowerCase()))return false;
-    return true;
-  }),[lista,filterLoja,filterStatus,busca,subTab]);
-  return (
-    <div style={S.page}>
-      <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:16}}>
-        {[["compras","🛒 Lista de compras"],["legais",`✨ Legais${itensLegais.length>0?` (${itensLegais.length})`:""}`]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
-        ))}
-      </div>
-      <input style={S.searchInput} placeholder="🔍 Buscar produto..." value={busca} onChange={e=>setBusca(e.target.value)}/>
-      <div style={S.filterRow}>
-        {["Todas",...new Set(lista.map(p=>p.loja))].map(l=><button key={l} style={{...S.chip,...(filterLoja===l?S.chipActive:{})}} onClick={()=>setFilterLoja(l)}>{l}</button>)}
-      </div>
-      {subTab==="compras"&&(
-        <div style={S.filterRow}>
-          {[["Todos","Todos"],["pendente","⏳ Pendentes"],["comprado","✅ Comprados"]].map(([v,l])=><button key={v} style={{...S.chip,...(filterStatus===v?S.chipActive:{})}} onClick={()=>setFilterStatus(v)}>{l}</button>)}
-        </div>
-      )}
-      <div style={{fontSize:12,color:C.textLight,marginBottom:10,fontWeight:500}}>{filtered.length} item(s)</div>
-      {filtered.map(p=><ProdutoCard key={p.id} p={p} settings={settings} onToggle={subTab==="compras"?()=>onToggle(p.id):null} onDelete={()=>onDelete(p.id,subTab==="legais"?"legais":"produtos")} onEdit={()=>onEdit({...p,_legais:subTab==="legais"})} onMoveToList={subTab==="legais"?()=>onMoveToList(p):null} isLegais={subTab==="legais"}/>)}
-      {filtered.length===0&&lista.length>0&&<Empty text="Nenhum item encontrado"/>}
-    </div>
-  );
-}
-
-function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}) {
-  const [expanded,setExpanded]=useState(false);
-  const brl=calcBRL(p.usd,settings);
-  const brlPago=p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):null;
-  const peso=pesoGramas(p);
-  const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
-  const pc=prioColors[p.prioridade]||prioColors["Média"];
-  return (
-    <div style={{...S.card,marginBottom:10,opacity:p.status==="comprado"?0.75:1}}>
-      <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
-        <div style={{width:50,height:50,borderRadius:12,overflow:"hidden",flexShrink:0,border:`1px solid ${C.border}`}}>
-          <ProductImage produto={p} iconSize={22}/>
-        </div>
-        {!isLegais&&onToggle&&<button style={{...S.checkbox,...(p.status==="comprado"?S.checkboxDone:{})}} onClick={onToggle}>{p.status==="comprado"&&<svg width="12" height="12" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}</button>}
-        <div style={{flex:1}} onClick={()=>setExpanded(e=>!e)}>
-          <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
-            <div style={{fontWeight:600,fontSize:14,color:p.status==="comprado"?C.textLight:C.text,textDecoration:p.status==="comprado"?"line-through":"none",lineHeight:1.3,flex:1}}>{p.nome}</div>
-            <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${p.usd}</div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>R${brl.toFixed(0)}</div>
-            </div>
-          </div>
-          <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
-            <span style={S.tag}>{p.loja}</span>
-            {!isLegais&&<span style={{...S.tag,background:pc.bg,color:pc.color,borderColor:pc.color+"33"}}>{p.prioridade}</span>}
-            <span style={S.tag}>{(peso/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg</span>
-            {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ Comprado</span>}
-          </div>
-        </div>
-      </div>
-      {expanded&&(
-        <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[{label:"BRL previsto",value:`R$ ${brl.toFixed(2)}`},...(brlPago?[{label:"BRL pago",value:`R$ ${brlPago.toFixed(2)}`,color:C.success},{label:"Diferença",value:`R$ ${(brl-brlPago).toFixed(2)}`,color:brl>brlPago?C.success:C.danger}]:[]),{label:"USD c/ taxa",value:`US$ ${calcUsdFinal(p.usd,settings).toFixed(2)}`,color:C.textMid}].map(({label,value,color})=>(
-            <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-              <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-              <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
-            </div>
-          ))}
-          {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{display:"block",fontSize:13,color:C.primary,marginTop:8}}>🔗 Ver produto</a>}
-          <div style={{display:"flex",gap:8,marginTop:10}}>
-            <button style={S.btnOutline} onClick={onEdit}>✏ Editar</button>
-            {onMoveToList&&<button style={{...S.btnOutline,color:C.success,borderColor:C.success+"44"}} onClick={onMoveToList}>📋 Mover p/ lista</button>}
-            <button style={{...S.btnOutline,color:C.danger,borderColor:C.danger+"44"}} onClick={onDelete}>🗑</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── GALERIA TAB ──────────────────────────────────────────────────────────────
-function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
-  const [subTab,setSubTab]=useState("compras");
-  const lista=subTab==="legais"?itensLegais:produtos;
-  return (
-    <div style={S.page}>
-      <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
-        {[["compras","🛒 Compras"],["legais","✨ Legais"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
-        ))}
-      </div>
-      <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#0369A1"}}>🔍 Imagens buscadas via og:image do link ou DuckDuckGo. Adicione o link do produto para melhor resultado.</div>
-      </div>
-      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        {lista.map(p=>(
-          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>onEdit({...p,_legais:subTab==="legais"})} className="galeria-card">
-            <div style={{height:120,position:"relative",overflow:"hidden"}}>
-              <ProductImage produto={p} iconSize={40}/>
-              {p.status==="comprado"&&<div style={{position:"absolute",top:8,right:8,background:C.success,borderRadius:999,padding:"2px 8px",fontSize:10,color:"white",fontWeight:700}}>✓ Comprado</div>}
-              {p.prioridade==="Alta"&&p.status!=="comprado"&&<div style={{position:"absolute",top:8,left:8,background:C.danger,borderRadius:999,padding:"2px 8px",fontSize:10,color:"white",fontWeight:700}}>Alta</div>}
-            </div>
-            <div style={{padding:"10px 12px"}}>
-              <div style={{fontSize:12,fontWeight:600,color:C.text,lineHeight:1.3,marginBottom:5,overflow:"hidden",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{p.nome}</div>
-              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${p.usd}</div>
-              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>R${calcBRL(p.usd,settings).toFixed(0)}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-      {lista.length===0&&<Empty text="Nenhum item ainda"/>}
-    </div>
-  );
-}
-
-// ─── STATS TAB ────────────────────────────────────────────────────────────────
-function StatsTab({produtos,gastos,settings}) {
-  const [secao,setSecao]=useState("compras");
-  const barColors=[C.primary,C.purple,C.success,C.warning,C.danger,"#06B6D4","#F97316","#EC4899"];
-
-  // ── Compras stats ──────────────────────────────────────────────────────────
-  const porLoja=useMemo(()=>{
-    const map={};
-    produtos.forEach(p=>{
-      if(!map[p.loja])map[p.loja]={total:0,comprados:0,usd:0,brl:0,peso:0};
-      map[p.loja].total++;
-      if(p.status==="comprado")map[p.loja].comprados++;
-      map[p.loja].usd+=p.usd;
-      map[p.loja].brl+=calcBRL(p.usd,settings);
-      map[p.loja].peso+=pesoGramas(p);
-    });
-    return Object.entries(map).sort((a,b)=>b[1].usd-a[1].usd);
-  },[produtos,settings]);
-  const totalUSDCompras=porLoja.reduce((a,[,v])=>a+v.usd,0);
-
-  // ── Gastos stats ───────────────────────────────────────────────────────────
-  const porCategoria=useMemo(()=>{
-    const map={};
-    gastos.forEach(g=>{
-      const cat=g.categoria||"💳 Outros";
-      if(!map[cat])map[cat]={total:0,usd:0,minhaUSD:0,aReceber:0};
-      const usd=parseFloat(g.usd)||0;
-      const minha=calcMinhaParteUSD(g);
-      const nP=1+(g.divisao?.length||0);
-      const aRec=g.divisao?g.divisao.filter(p=>!p.pago).length*(usd/nP):0;
-      map[cat].total++;
-      map[cat].usd+=usd;
-      map[cat].minhaUSD+=minha;
-      map[cat].aReceber+=aRec;
-    });
-    return Object.entries(map).sort((a,b)=>b[1].usd-a[1].usd);
-  },[gastos]);
-
-  const porPessoa=useMemo(()=>{
-    const map={};
-    gastos.forEach(g=>{
-      if(!g.divisao||g.divisao.length===0) return;
-      const usd=parseFloat(g.usd)||0;
-      const nP=1+g.divisao.length;
-      const part=usd/nP;
-      g.divisao.forEach(p=>{
-        if(!map[p.nome])map[p.nome]={totalUSD:0,pago:0,pendente:0,gastos:0};
-        map[p.nome].totalUSD+=part;
-        map[p.nome].gastos++;
-        if(p.pago) map[p.nome].pago+=part;
-        else map[p.nome].pendente+=part;
-      });
-    });
-    return Object.entries(map).sort((a,b)=>b[1].totalUSD-a[1].totalUSD);
-  },[gastos]);
-
-  const totalGastosUSD=gastos.reduce((a,g)=>a+(parseFloat(g.usd)||0),0);
-  const totalMeuUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g),0);
-  const totalAReceberUSD=gastos.reduce((a,g)=>{
-    if(!g.divisao||g.divisao.length===0) return a;
-    const usd=parseFloat(g.usd)||0;
-    const nP=1+g.divisao.length;
-    return a+g.divisao.filter(p=>!p.pago).length*(usd/nP);
-  },0);
-
-  return (
-    <div style={S.page}>
-      {/* Sub-tabs */}
-      <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:14}}>
-        {[["compras","🛒 Compras"],["gastos","💸 Gastos"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:secao===v?C.bgCard:"transparent",color:secao===v?C.primary:C.textMid,boxShadow:secao===v?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.2s"}} onClick={()=>setSecao(v)}>{l}</button>
-        ))}
-      </div>
-
-      {/* ── COMPRAS ── */}
-      {secao==="compras"&&(
-        <>
-          {/* Resumo compras */}
-          <div style={{display:"flex",gap:8,marginBottom:12}}>
-            {[{label:"Total USD",value:`US$ ${totalUSDCompras.toFixed(0)}`,color:C.primary},{label:"Comprados",value:`${produtos.filter(p=>p.status==="comprado").length}/${produtos.length}`,color:C.success}].map(({label,value,color})=>(
-              <div key={label} style={{...S.card,flex:1,textAlign:"center",padding:"12px 8px",marginBottom:0}}>
-                <div style={{fontSize:16,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{value}</div>
-                <div style={{fontSize:11,color:C.textLight,marginTop:2}}>{label}</div>
-              </div>
-            ))}
-          </div>
-
-          {/* Gastos por loja */}
-          <div style={S.card}>
-            <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:14}}>Compras por loja</div>
-            {porLoja.map(([loja,d],i)=>{
-              const pct=totalUSDCompras?(d.usd/totalUSDCompras*100):0;
-              const color=barColors[i%barColors.length];
-              return(
-                <div key={loja} style={{marginBottom:14}}>
-                  <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <div style={{width:10,height:10,borderRadius:"50%",background:color,flexShrink:0}}/>
-                      <span style={{fontSize:13,fontWeight:600,color:C.text}}>{loja}</span>
-                    </div>
-                    <div style={{textAlign:"right"}}>
-                      <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>US$ {d.usd.toFixed(0)}</span>
-                      <span style={{fontSize:11,color:C.textLight,marginLeft:6}}>{pct.toFixed(0)}%</span>
-                    </div>
-                  </div>
-                  <div style={{height:6,background:C.borderLight,borderRadius:999,overflow:"hidden",marginBottom:4}}>
-                    <div style={{width:`${pct}%`,height:"100%",background:color,borderRadius:999,transition:"width 0.5s"}}/>
-                  </div>
-                  <div style={{fontSize:11,color:C.textLight}}>{d.comprados}/{d.total} comprados · {(d.peso/1000).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}kg</div>
-                </div>
-              );
-            })}
-            {porLoja.length===0&&<div style={{fontSize:13,color:C.textLight,textAlign:"center",padding:"16px 0"}}>Nenhum produto ainda</div>}
-          </div>
-
-          {/* Ranking tabela */}
-          <div style={S.card}>
-            <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>Ranking de lojas</div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,marginBottom:8}}>
-              {["Loja","Itens","USD","Concl."].map(h=><div key={h} style={{fontSize:10,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.4px"}}>{h}</div>)}
-            </div>
-            {porLoja.map(([loja,d])=>(
-              <div key={loja} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,padding:"9px 0",borderTop:`1px solid ${C.borderLight}`}}>
-                <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{loja}</div>
-                <div style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{d.total}</div>
-                <div style={{fontSize:12,color:C.primary,fontFamily:"'DM Mono',monospace",fontWeight:700}}>US${d.usd.toFixed(0)}</div>
-                <div style={{fontSize:12,color:d.total&&d.comprados/d.total>=1?C.success:C.textMid,fontFamily:"'DM Mono',monospace"}}>{d.total?Math.round(d.comprados/d.total*100):0}%</div>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* ── GASTOS ── */}
-      {secao==="gastos"&&(
-        <>
-          {/* Resumo gastos */}
-          <div style={S.heroCard}>
-            <div style={{fontSize:12,color:"rgba(255,255,255,0.7)",marginBottom:4}}>Total de gastos (bruto)</div>
-            <div style={{fontSize:28,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace",letterSpacing:"-0.5px"}}>US$ {totalGastosUSD.toFixed(2)}</div>
-            <div style={{display:"flex",gap:8,marginTop:12}}>
-              <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Minha parte</div>
-                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>US$ {totalMeuUSD.toFixed(2)}</div>
-              </div>
-              <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>A receber</div>
-                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>US$ {totalAReceberUSD.toFixed(2)}</div>
-              </div>
-              <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 12px",flex:1,textAlign:"center"}}>
-                <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Itens</div>
-                <div style={{fontSize:14,fontWeight:800,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{gastos.length}</div>
-              </div>
-            </div>
-          </div>
-
-          {/* Por categoria */}
-          {porCategoria.length>0&&(
-            <div style={S.card}>
-              <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:14}}>Por categoria</div>
-              {porCategoria.map(([cat,d],i)=>{
-                const pct=totalGastosUSD?(d.usd/totalGastosUSD*100):0;
-                const color=barColors[i%barColors.length];
-                return(
-                  <div key={cat} style={{marginBottom:14}}>
-                    <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
-                      <div style={{display:"flex",alignItems:"center",gap:8}}>
-                        <div style={{width:10,height:10,borderRadius:"50%",background:color,flexShrink:0}}/>
-                        <span style={{fontSize:13,fontWeight:600,color:C.text}}>{cat}</span>
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>US$ {d.usd.toFixed(2)}</div>
-                        <div style={{fontSize:11,color:C.textLight}}>meu: US$ {d.minhaUSD.toFixed(2)} · {pct.toFixed(0)}%</div>
-                      </div>
-                    </div>
-                    <div style={{height:6,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
-                      <div style={{width:`${pct}%`,height:"100%",background:color,borderRadius:999,transition:"width 0.5s"}}/>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Por pessoa — quem me deve */}
-          {porPessoa.length>0&&(
-            <div style={S.card}>
-              <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:4}}>Divisão por pessoa</div>
-              <div style={{fontSize:12,color:C.textLight,marginBottom:12}}>Quanto cada pessoa deve ao total dos gastos divididos</div>
-              {porPessoa.map(([nome,d])=>(
-                <div key={nome} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-                  <div style={{display:"flex",alignItems:"center",gap:10}}>
-                    <div style={{width:32,height:32,borderRadius:"50%",background:C.primaryLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,fontWeight:700,color:C.primary}}>{nome[0].toUpperCase()}</div>
-                    <div>
-                      <div style={{fontSize:13,fontWeight:600,color:C.text}}>{nome}</div>
-                      <div style={{fontSize:11,color:C.textLight}}>{d.gastos} gasto(s)</div>
-                    </div>
-                  </div>
-                  <div style={{textAlign:"right"}}>
-                    <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US$ {d.totalUSD.toFixed(2)}</div>
-                    <div style={{display:"flex",gap:6,justifyContent:"flex-end",marginTop:3}}>
-                      {d.pago>0&&<span style={{fontSize:11,color:C.success,fontWeight:600}}>✓ US${d.pago.toFixed(2)}</span>}
-                      {d.pendente>0&&<span style={{fontSize:11,color:C.danger,fontWeight:600}}>⏳ US${d.pendente.toFixed(2)}</span>}
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {/* Total a receber */}
-              {totalAReceberUSD>0&&(
-                <div style={{marginTop:12,background:C.warningLight,border:`1px solid ${C.warning}33`,borderRadius:10,padding:"10px 14px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                  <span style={{fontSize:13,fontWeight:600,color:C.warning}}>⏳ Total a receber</span>
-                  <span style={{fontSize:15,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>US$ {totalAReceberUSD.toFixed(2)}</span>
-                </div>
               )}
             </div>
-          )}
 
-          {/* Tabela completa de gastos */}
-          <div style={S.card}>
-            <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>Todos os gastos</div>
-            <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,marginBottom:8}}>
-              {["Descrição","USD total","Meu USD","Divisão"].map(h=><div key={h} style={{fontSize:10,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.3px"}}>{h}</div>)}
-            </div>
-            {gastos.length===0&&<div style={{fontSize:13,color:C.textLight,textAlign:"center",padding:"16px 0"}}>Nenhum gasto ainda</div>}
-            {gastos.map(g=>{
-              const usd=parseFloat(g.usd)||0;
-              const minha=calcMinhaParteUSD(g);
-              const nP=1+(g.divisao?.length||0);
-              return(
-                <div key={g.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,padding:"9px 0",borderTop:`1px solid ${C.borderLight}`,alignItems:"center"}}>
-                  <div>
-                    <div style={{fontSize:12,fontWeight:600,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{g.descricao}</div>
-                    <div style={{fontSize:10,color:C.textLight}}>{g.loja||g.categoria}</div>
-                  </div>
-                  <div style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>US${usd.toFixed(2)}</div>
-                  <div style={{fontSize:12,color:C.primary,fontFamily:"'DM Mono',monospace",fontWeight:700}}>US${minha.toFixed(2)}</div>
-                  <div style={{fontSize:11,color:C.textMid}}>{nP>1?`÷${nP}p`:"-"}</div>
+            {/* EXPANSÃO DA DIVISÃO DESIGUAL DE GASTOS */}
+            {type === \"gasto\" && gastoPessoas.length > 0 && (
+              <div style={{ background: C.bg, padding: 12, borderRadius: 12, border: `1px solid ${C.borderLight}`, marginTop: 4 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: C.textMid, display: \"block\", marginBottom: 8 }}>AJUSTAR SALDO POR PESSOA (EDITÁVEL):</span>
+                <div style={{ display: \"flex\", flexDirection: \"column\", gap: 8 }}>
+                  {gastoPessoas.map((p, idx) => (
+                    <div key={p.nome} style={{ display: \"flex\", alignItems: \"center\", justifyContent: \"space-between\", gap: 10 }}>
+                      <span style={{ fontSize: 12, fontWeight: 600, color: C.text }}>Share do {p.nome}:</span>
+                      <div style={{ display: \"flex\", alignItems: \"center\", background: C.bgCard, border: `1px solid ${C.border}`, borderRadius: 8, padding: \"4px 8px\", width: 120 }}>
+                        <span style={{ fontSize: 12, color: C.textLight, marginRight: 2 }}>$</span>
+                        <input type=\"number\" step=\"0.01\" value={p.valorCustom} onChange={e => handleUpdateGastoCustomValue(idx, e.target.value)} style={{ border: \"none\", width: \"100%\", fontSize: 12, fontWeight: 700, outline: \"none\", color: C.text }} placeholder=\"0.00\" />
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-            {gastos.length>0&&(
-              <div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,padding:"10px 0",borderTop:`2px solid ${C.border}`,marginTop:4}}>
-                <div style={{fontSize:12,fontWeight:700,color:C.text}}>Total</div>
-                <div style={{fontSize:12,fontWeight:700,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>US${totalGastosUSD.toFixed(2)}</div>
-                <div style={{fontSize:12,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${totalMeuUSD.toFixed(2)}</div>
-                <div/>
               </div>
             )}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
-// ─── BCB RATE COMPONENT (somente na calculadora) ─────────────────────────────
-function BcbRate() {
-  const [rate, setRate] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [lastFetch, setLastFetch] = useState(null);
+            {type !== \"gasto\" && (
+              <div>
+                <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>LINK DO SITE (OPCIONAL)</label>
+                <input type=\"url\" value={link} onChange={e => setLink(e.target.value)} placeholder=\"https://...\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\" }} />
+              </div>
+            )}
 
-  async function fetch_() {
-    setLoading(true);
-    const val = await fetchCotacao();
-    if (val) { setRate(val); setLastFetch(new Date().toLocaleTimeString("pt-BR",{hour:"2-digit",minute:"2-digit"})); }
-    setLoading(false);
-  }
-
-  return (
-    <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <div>
-          <div style={{fontSize:12,fontWeight:600,color:C.textMid}}>Cotação de mercado (BCB)</div>
-          {rate&&<div style={{fontSize:11,color:C.textLight}}>atualizado às {lastFetch}</div>}
-        </div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>R$ {rate.toFixed(4)}</span>}
-          <button onClick={fetch_} style={{background:C.primaryLight,border:`1px solid ${C.primary}33`,borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:600,color:C.primary,cursor:"pointer"}}>
-            {loading?"...":"↻ BCB"}
-          </button>
-        </div>
-      </div>
-      {rate&&<div style={{fontSize:12,color:C.textLight,marginTop:4}}>Use este valor como referência de mercado. O dólar pago (configurações) é o que realmente pagou.</div>}
-    </div>
-  );
-}
-
-// ─── CALC TAB ─────────────────────────────────────────────────────────────────
-function CalcTab({settings}) {
-  const [usd,setUsd]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState("");
-  const dolarAj=calcDolarAjustado(settings); const usdN=parseFloat(usd)||0;
-  const usdF=calcUsdFinal(usdN,settings); const brlP=usdF*dolarAj; const brlC=dc?usdF*parseFloat(dc):null;
-  return (
-    <div style={S.page}>
-      <div style={S.sectionLabel}>Conversor USD → BRL</div>
-      <div style={S.card}>
-        <label style={S.label}>Valor em USD</label>
-        <input style={S.input} type="number" placeholder="Ex: 199" value={usd} onChange={e=>setUsd(e.target.value)}/>
-        {usdN>0&&[{label:"USD c/ taxa",value:`US$ ${usdF.toFixed(2)}`,color:C.textMid},{label:"Dólar ajustado",value:`R$ ${dolarAj.toFixed(4)}`,color:C.textMid},{label:"Valor em BRL",value:`R$ ${brlP.toFixed(2)}`,color:C.primary}].map(({label,value,color})=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-            <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-            <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
-          </div>
-        ))}
-        <div style={{height:14}}/>
-        <label style={S.label}>Dólar que você pagou (opcional)</label>
-        <input style={S.input} type="number" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
-        {brlC&&usdN>0&&[{label:"Com seu dólar",value:`R$ ${brlC.toFixed(2)}`,color:C.success},{label:"Diferença",value:`R$ ${(brlP-brlC).toFixed(2)}`,color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-            <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-            <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
-          </div>
-        ))}
-      </div>
-      <div style={S.sectionLabel}>Conversor de Peso</div>
-      <div style={S.card}>
-        <label style={S.label}>Libras (lbs)</label>
-        <input style={S.input} type="number" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
-        {lbs&&[[`Gramas`,`${(parseFloat(lbs)*453.592).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}g`],[`Kg`,`${(parseFloat(lbs)*453.592/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg`],["Oz",`${(parseFloat(lbs)*16).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})} oz`]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
-        <div style={{height:12}}/>
-        <label style={S.label}>Onças (oz)</label>
-        <input style={S.input} type="number" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
-        {oz&&[["Gramas",`${(parseFloat(oz)*28.3495).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}g`],["Kg",`${(parseFloat(oz)*28.3495/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg`],["Libras",`${(parseFloat(oz)/16).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})} lbs`]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
-      </div>
-      <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
-        {[["Dólar pago",`R$ ${settings.dollarPago.toFixed(4)}`],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",`R$ ${dolarAj.toFixed(4)}`]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
-        <BcbRate/>
-      </div>
-    </div>
-  );
-}
-
-// ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
-function SettingsModal({settings,onSave,onImport,onClose}) {
-  const [s,setS]=useState({...settings});
-  const [tab,setTab]=useState("config");
-  const [preview,setPreview]=useState(null);
-  const [loading,setLoading]=useState(false);
-  const [error,setError]=useState(null);
-  const fileRef=useRef();
-  function processFile(file) {
-    if(!file)return; setLoading(true); setError(null); setPreview(null);
-    const reader=new FileReader();
-    reader.onload=e=>{
-      try { const data=new Uint8Array(e.target.result); const wb=XLSX.read(data,{type:"array"}); const sheets=wb.SheetNames;
-        const comprasSheet=sheets.find(s=>s.toLowerCase().includes("compras")&&!s.toLowerCase().includes("parcelas"));
-        const legaisSheet=sheets.find(s=>s.toLowerCase().includes("legais")||s.toLowerCase().includes("legal"));
-        const compras=comprasSheet?parseSheet(wb,comprasSheet):[];
-        const legais=legaisSheet?parseSheet(wb,legaisSheet):[];
-        setPreview({compras,legais,comprasSheet,legaisSheet}); setLoading(false);
-      } catch(err){setError("Erro: "+err.message); setLoading(false);}
-    };
-    reader.readAsArrayBuffer(file);
-  }
-  return (
-    <Modal title="Configurações" onClose={onClose}>
-      <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:10,padding:4,marginBottom:20}}>
-        {[["config","⚙ Config"],["import","📂 Excel"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"8px",borderRadius:8,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:tab===v?C.bgCard:"transparent",color:tab===v?C.primary:C.textMid,boxShadow:tab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setTab(v)}>{l}</button>
-        ))}
-      </div>
-      {tab==="config"&&(
-        <>
-          <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>💵 Dólar pago</div>
-          <label style={S.label}>Quanto você pagou pelo dólar (R$)</label>
-          <input style={S.input} type="number" step="0.0001" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
-          <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10,marginTop:4}}>📊 Taxas (para cálculo do custo real)</div>
-          {[["IOF (%)","iof","0.01"],["Spread (%)","spread","0.01"],["Taxa de compra (%)","taxa","0.1"]].map(([l,f,st])=>(
-            <div key={f} style={{marginBottom:12}}>
-              <label style={S.label}>{l}</label>
-              <input style={S.input} type="number" step={st} value={s[f]} onChange={e=>setS(p=>({...p,[f]:parseFloat(e.target.value)||0}))}/>
+            <div>
+              <label style={{ display: \"block\", fontSize: 11, fontWeight: 600, color: C.textMid, marginBottom: 4 }}>OBSERVAÇÕES / NOTAS</label>
+              <textarea value={nota} onChange={e => setNota(e.target.value)} placeholder=\"Cor, tamanho, detalhes adicionais...\" style={{ width: \"100%\", padding: 10, borderRadius: 10, border: `1px solid ${C.border}`, fontSize: 13, outline: \"none\", boxSizing: \"border-box\", height: 50, fontFamily: \"inherit\", resize: \"none\" }} />
             </div>
-          ))}
-          <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>✈ Viagem</div>
-          <div style={{marginBottom:12}}>
-            <label style={S.label}>Total de dólares que está levando (US$)</label>
-            <input style={S.input} type="number" step="100" value={s.totalDolarViagem} onChange={e=>setS(p=>({...p,totalDolarViagem:parseFloat(e.target.value)||0}))}/>
-          </div>
-          <div style={{marginBottom:12}}>
-            <label style={S.label}>Peso máximo da mala (kg)</label>
-            <input style={S.input} type="number" step="0.5" placeholder="23" value={(s.pesoMax/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})} onChange={e=>setS(p=>({...p,pesoMax:Math.round((parseFloat(e.target.value.replace(",","."))||0)*1000)}))}/>
-          </div>
-          <button style={S.btnPrimary} onClick={()=>onSave(s)}>Salvar configurações</button>
-        </>
-      )}
-      {tab==="import"&&(
-        <>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
-          <div style={{border:`2px dashed ${loading?C.primary:C.border}`,borderRadius:16,textAlign:"center",padding:"28px 20px",cursor:"pointer",background:loading?C.primaryLight:C.bg}} onClick={()=>fileRef.current.click()} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();processFile(e.dataTransfer.files[0]);}}>
-            <div style={{fontSize:36,marginBottom:10}}>{loading?"⏳":"📊"}</div>
-            <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:4}}>{loading?"Processando...":"Selecionar planilha"}</div>
-            <div style={{fontSize:13,color:C.textLight}}>Arraste ou toque · .xlsx</div>
-          </div>
-          {error&&<div style={{marginTop:10,background:C.dangerLight,border:`1px solid ${C.danger}33`,borderRadius:10,padding:"10px",fontSize:13,color:C.danger}}>{error}</div>}
-          {preview&&(
-            <div style={{marginTop:14}}>
-              <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Prévia</div>
-              {[["Aba Compras",preview.comprasSheet||"—"],["Aba Legais",preview.legaisSheet||"—"],["Produtos",`${preview.compras.length} itens`],["Legais",`${preview.legais.length} itens`]].map(([l,v])=>(
-                <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-                  <span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:600,color:C.text}}>{v}</span>
-                </div>
-              ))}
-              {preview.compras.slice(0,3).map((p,i)=>(
-                <div key={i} style={{fontSize:12,color:C.textMid,padding:"4px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontWeight:600,color:C.text}}>{p.nome}</span> · {p.loja} · US${p.usd}</div>
-              ))}
-              <button style={{...S.btnPrimary,marginTop:12}} onClick={()=>{onImport(preview.compras,preview.legais);setPreview(null);}}>✅ Confirmar importação</button>
-            </div>
-          )}
-        </>
-      )}
-    </Modal>
-  );
-}
+          </>
+        )}
 
-// ─── PRODUTO FORM ─────────────────────────────────────────────────────────────
-function ProdutoForm({prod,onSave,onClose}) {
-  const isL=prod?._legais===true;
-  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipo:"solido",volume:"",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",_legais:isL};
-  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),dollarPago:(prod.dollarPago||"").toString(),_legais:prod._legais||isL}:empty);
-  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,volume:parseFloat(f.volume)||0,dollarPago:f.dollarPago?parseFloat(f.dollarPago):null});}
-  return (
-    <Modal title={prod?.id?"Editar produto":isL?"✨ Item legal":"Novo produto"} onClose={onClose}>
-      <label style={S.label}>Nome *</label>
-      <input style={S.input} placeholder="Ex: AirPods Pro" value={f.nome} onChange={e=>setF(p=>({...p,nome:e.target.value}))}/>
-      <label style={S.label}>Loja</label>
-      <input style={S.input} list="lojas-list" placeholder="Digite ou escolha uma loja..." value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
-      <datalist id="lojas-list">{LOJAS_SUGESTOES.map(l=><option key={l} value={l}/>)}</datalist>
-      <label style={S.label}>Preço USD *</label>
-      <input style={S.input} type="number" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
-      <label style={S.label}>Tipo</label>
-      <div style={{display:"flex",gap:8,marginBottom:14}}>{[["solido","📦 Sólido"],["liquido","💧 Líquido"]].map(([v,l])=><button key={v} style={{...S.chipSel,flex:1,...(f.tipo===v?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,tipo:v}))}>{l}</button>)}</div>
-      {f.tipo==="solido"?<><label style={S.label}>Peso (gramas)</label><input style={S.input} type="number" placeholder="Ex: 250" value={f.peso} onChange={e=>setF(p=>({...p,peso:e.target.value}))}/>{f.peso&&<div style={{fontSize:12,color:C.textLight,marginTop:-8,marginBottom:12}}>= {((parseFloat(f.peso)||0)/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}</>:<><label style={S.label}>Volume (oz)</label><input style={S.input} type="number" step="0.1" placeholder="Ex: 3.4" value={f.volume} onChange={e=>setF(p=>({...p,volume:e.target.value}))}/>{f.volume&&<div style={{fontSize:12,color:C.textLight,marginTop:-8,marginBottom:12}}>= {((parseFloat(f.volume)||0)*28.3495/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}</>}
-      {!isL&&(<>
-        <label style={S.label}>Prioridade</label>
-        <div style={{display:"flex",gap:8,marginBottom:14}}>{PRIORIDADES.map(pr=><button key={pr} style={{...S.chipSel,flex:1,...(f.prioridade===pr?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,prioridade:pr}))}>{pr}</button>)}</div>
-        <label style={S.label}>Status</label>
-        <div style={{display:"flex",gap:8,marginBottom:14}}>{[["pendente","⏳ Pendente"],["comprado","✅ Comprado"]].map(([v,l])=><button key={v} style={{...S.chipSel,flex:1,...(f.status===v?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,status:v}))}>{l}</button>)}</div>
-        {f.status==="comprado"&&<><label style={S.label}>Dólar pago (R$)</label><input style={S.input} type="number" step="0.01" placeholder="5.71" value={f.dollarPago} onChange={e=>setF(p=>({...p,dollarPago:e.target.value}))}/></>}
-      </>)}
-      <label style={S.label}>Link (para buscar imagem)</label>
-      <input style={S.input} type="url" placeholder="https://amazon.com/..." value={f.link} onChange={e=>setF(p=>({...p,link:e.target.value}))}/>
-      <label style={S.label}>URL da imagem (opcional)</label>
-      <input style={S.input} type="url" placeholder="https://..." value={f.imagem} onChange={e=>setF(p=>({...p,imagem:e.target.value}))}/>
-      <button style={S.btnPrimary} onClick={save}>{prod?.id?"Salvar":isL?"Adicionar item":"Adicionar produto"}</button>
-    </Modal>
-  );
-}
-
-// ─── SHARED ───────────────────────────────────────────────────────────────────
-function Modal({title,onClose,children}) {
-  return (
-    <div style={S.modalOverlay} onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div style={S.modal}>
-        <div style={S.modalHeader}><div style={S.modalTitle}>{title}</div><button style={S.closeBtn} onClick={onClose}>✕</button></div>
-        <div style={S.modalBody}>{children}</div>
-      </div>
+        <button type=\"submit\" style={{ width: \"100%\", padding: 12, background: `linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`, color: \"#FFF\", border: \"none\", borderRadius: 12, fontSize: 14, fontWeight: 700, cursor: \"pointer\", marginTop: 6, boxShadow: \"0 4px 12px rgba(37,99,235,0.15)\" }}>
+          Salvar Alterações na Nuvem
+        </button>
+      </form>
     </div>
   );
 }
-function Empty({text}) {
-  return <div style={{textAlign:"center",padding:"40px 0"}}><div style={{fontSize:36,marginBottom:10}}>📭</div><div style={{fontSize:13,color:C.textLight,fontWeight:500}}>{text}</div></div>;
-}
 
-// ─── STYLES ───────────────────────────────────────────────────────────────────
-const S={
-  app:{background:C.bg,minHeight:"100vh",maxWidth:430,margin:"0 auto",position:"relative",fontFamily:"'Inter',sans-serif",color:C.text,display:"flex",flexDirection:"column"},
-  header:{background:C.bgCard,borderBottom:`1px solid ${C.border}`,padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",position:"sticky",top:0,zIndex:50,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"},
-  headerLeft:{display:"flex",gap:10,alignItems:"center"},
-  logoBox:{width:36,height:36,background:`linear-gradient(135deg,${C.gradientA},${C.gradientB})`,borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,color:"white"},
-  headerTitle:{fontSize:15,fontWeight:700,color:C.text,letterSpacing:"-0.3px"},
-  headerSub:{fontSize:11,color:C.textLight,fontWeight:500},
-  settingsBtn:{background:C.bg,border:`1px solid ${C.border}`,width:36,height:36,borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"},
-  content:{flex:1,overflowY:"auto",paddingBottom:90},
-  page:{padding:"14px 14px 8px"},
-  nav:{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:430,background:C.bgCard,borderTop:`1px solid ${C.border}`,display:"flex",zIndex:50,padding:"6px 0 14px",boxShadow:"0 -2px 10px rgba(0,0,0,0.06)"},
-  navBtn:{flex:1,background:"none",border:"none",color:C.textLight,cursor:"pointer",display:"flex",flexDirection:"column",alignItems:"center",gap:2,padding:"4px 1px",position:"relative"},
-  navBtnActive:{color:C.primary},
-  navLabel:{fontSize:9,fontWeight:600,letterSpacing:"0.2px"},
-  navIndicator:{position:"absolute",bottom:-6,left:"50%",transform:"translateX(-50%)",width:4,height:4,borderRadius:"50%",background:C.primary},
-  fab:{position:"fixed",bottom:80,right:"calc(50% - 215px + 14px)",background:`linear-gradient(135deg,${C.gradientA},${C.gradientB})`,border:"none",width:52,height:52,borderRadius:16,cursor:"pointer",boxShadow:`0 6px 20px ${C.primary}55`,display:"flex",alignItems:"center",justifyContent:"center",zIndex:60},
-  heroCard:{background:`linear-gradient(135deg,${C.gradientA} 0%,${C.gradientB} 100%)`,borderRadius:18,padding:"20px 18px",marginBottom:12,boxShadow:`0 8px 24px ${C.primary}33`},
-  card:{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px",marginBottom:10,boxShadow:"0 1px 3px rgba(0,0,0,0.04)"},
-  grid4:{display:"flex",gap:8,marginBottom:10},
-  checkbox:{width:22,height:22,borderRadius:7,border:`2px solid ${C.border}`,background:C.bg,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"},
-  checkboxDone:{background:C.success,borderColor:C.success},
-  searchInput:{width:"100%",background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:10,padding:"10px 12px",color:C.text,fontSize:14,marginBottom:8,boxSizing:"border-box",outline:"none",fontFamily:"'Inter',sans-serif"},
-  filterRow:{display:"flex",gap:6,overflowX:"auto",paddingBottom:4,marginBottom:8},
-  chip:{background:C.bgCard,border:`1px solid ${C.border}`,color:C.textMid,fontSize:12,padding:"4px 10px",borderRadius:999,cursor:"pointer",whiteSpace:"nowrap",fontWeight:600},
-  chipActive:{background:C.primaryLight,border:`1px solid ${C.primary}44`,color:C.primary},
-  chipSel:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,fontSize:13,padding:"9px 8px",borderRadius:10,cursor:"pointer",fontWeight:600,fontFamily:"'Inter',sans-serif"},
-  chipSelActive:{background:C.primaryLight,border:`1px solid ${C.primary}66`,color:C.primary},
-  tag:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,fontSize:11,padding:"2px 7px",borderRadius:999,fontWeight:600},
-  sectionLabel:{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:8,marginTop:4},
-  btnPrimary:{width:"100%",background:`linear-gradient(135deg,${C.gradientA},${C.gradientB})`,border:"none",color:"white",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",boxShadow:`0 4px 14px ${C.primary}44`},
-  btnOutline:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,borderRadius:9,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:600,fontFamily:"'Inter',sans-serif"},
-  modalOverlay:{position:"fixed",inset:0,background:"rgba(15,23,42,0.35)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(4px)"},
-  modal:{background:C.bgCard,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"92vh",boxShadow:"0 -4px 32px rgba(0,0,0,0.12)"},
-  modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 18px 14px",borderBottom:`1px solid ${C.border}`},
-  modalTitle:{fontSize:16,fontWeight:700,color:C.text},
-  closeBtn:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,width:28,height:28,borderRadius:7,cursor:"pointer",fontSize:13,fontFamily:"'Inter',sans-serif"},
-  modalBody:{padding:"16px 18px 34px",overflowY:"auto",maxHeight:"calc(92vh - 60px)"},
-  label:{fontSize:12,color:C.textMid,fontWeight:600,display:"block",marginBottom:5},
-  input:{width:"100%",background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"10px 11px",color:C.text,fontSize:14,marginBottom:12,boxSizing:"border-box",outline:"none",fontFamily:"'Inter',sans-serif"},
-};
-
-const CSS=`
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
-  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-  body{background:#F8FAFC;}
-  select option{background:#fff;}
-  ::-webkit-scrollbar{width:3px;height:3px;}
-  ::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:2px;}
-  .notif{position:fixed;top:68px;left:50%;transform:translateX(-50%);z-index:200;padding:9px 18px;border-radius:999px;font-size:13px;font-weight:600;animation:slideDown 0.3s ease;white-space:nowrap;box-shadow:0 4px 14px rgba(0,0,0,0.1);}
-  .notif-success{background:#ECFDF5;border:1px solid #10B98133;color:#059669;}
-  .notif-error{background:#FEF2F2;border:1px solid #EF444433;color:#DC2626;}
-  @keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
-  .galeria-card:active{transform:scale(0.98);}
-  .spinner{width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:#2563EB;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
-  @keyframes spin{to{transform:rotate(360deg);}}
+// ─── STYLES VARIABLES INJECTION ──────────────────────────────────────────────
+const CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: #F8FAFC; }
+  select option { background: #fff; }
+  ::-webkit-scrollbar { width: 3px; height: 3px; }
+  ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 2px; }
+  .notif { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 300; padding: 10px 20px; border-radius: 12px; font-size: 13px; font-weight: 700; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); animation: slideDown 0.2s ease-out; }
+  @keyframes slideDown { from { top: -40px; opacity: 0; } to { top: 12px; opacity: 1; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
 `;
