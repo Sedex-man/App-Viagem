@@ -325,6 +325,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showGastoForm, setShowGastoForm] = useState(false);
+  const [prodSubTab, setProdSubTab] = useState("compras");
   const [editProd, setEditProd] = useState(null);
   const [editGasto, setEditGasto] = useState(null);
   const [notification, setNotification] = useState(null);
@@ -525,7 +526,7 @@ export default function App() {
 
       <div style={S.content}>
         {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg}/>}
-        {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList}/>}
+        {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab}/>}
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
@@ -543,7 +544,7 @@ export default function App() {
         ))}
       </nav>
 
-      {tab===1&&<button style={S.fab} onClick={()=>{setEditProd(null);setShowForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
+      {tab===1&&<button style={S.fab} onClick={()=>{setEditProd({_legais:prodSubTab==="legais"});setShowForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
       {tab===3&&<button style={S.fab} onClick={()=>{setEditGasto(null);setShowGastoForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
 
       {showSettings&&<SettingsModal settings={settings} onSave={s=>{setSettings(s);notify("Configurações salvas!");}} onImport={handleImport} onClose={()=>setShowSettings(false)}/>}
@@ -1145,8 +1146,9 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
 }
 
 // ─── PRODUTOS TAB ─────────────────────────────────────────────────────────────
-function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onAdd,onMoveToList}) {
+function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onAdd,onMoveToList,onSubTabChange}) {
   const [subTab,setSubTab]=useState("compras");
+  function changeSubTab(v){setSubTab(v);onSubTabChange&&onSubTabChange(v);}
   const [filterLoja,setFilterLoja]=useState("Todas");
   const [filterStatus,setFilterStatus]=useState("Todos");
   const [busca,setBusca]=useState("");
@@ -1161,7 +1163,7 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
     <div style={S.page}>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:16}}>
         {[["compras","🛒 Lista de compras"],["legais",`✨ Legais${itensLegais.length>0?` (${itensLegais.length})`:""}`]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
+          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>changeSubTab(v)}>{l}</button>
         ))}
       </div>
       <input style={S.searchInput} placeholder="🔍 Buscar produto..." value={busca} onChange={e=>setBusca(e.target.value)}/>
