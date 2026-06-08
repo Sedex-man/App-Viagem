@@ -17,7 +17,9 @@ const normalizeCloudState = data => ({
   itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
   gastos: Array.isArray(data?.gastos) ? data.gastos : [],
   parcelas: Array.isArray(data?.parcelas) ? data.parcelas : [],
-  planejamento: data?.planejamento || { dataInicio: "", dataFim: "", eventos: [] },
+  planejamento: data?.planejamento || { dataInicio:"", dataFim:"", eventos:[] },
+  checklist: Array.isArray(data?.checklist) ? data.checklist : [],
+  comprasDolar: Array.isArray(data?.comprasDolar) ? data.comprasDolar : [],
 });
 
 async function saveCloudState(userDocRef, state) {
@@ -38,7 +40,7 @@ const C = {
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const INITIAL_SETTINGS = { dollarPago:5.62, iof:3.38, spread:0.99, taxa:6.5, pesoMax:23000, totalDolarViagem:3000 };
-const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","Newegg","Apple","Restaurante","Uber","Passeio","Outro"];
+const LOJAS_SUGESTOES = ["Walmart","Basspro","Target","HomeGoods","Dollar Tree","Amazon","Marshalls","Ross","TJ Maxx","Tommy Hilfiger","Calvin Klein","The North Face","Sephora","Ulta","Best Buy","Costco","GameStop","Apple","Restaurante","Uber","Passeio","Outro"];
 const PRIORIDADES = ["Alta","Média","Baixa"];
 const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
 
@@ -290,7 +292,7 @@ function LoginScreen() {
     <div style={{minHeight:"100vh",background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
       <div style={{width:"100%",maxWidth:390,background:C.bgCard,borderRadius:24,padding:26,boxShadow:"0 24px 70px rgba(15,23,42,0.25)",border:"1px solid rgba(255,255,255,0.35)"}}>
         <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:22}}>
-          <img src="/image_a375cf.png" alt="TravelShop" style={{width:48,height:48,borderRadius:16,objectFit:"cover"}}/>
+          <div style={{width:48,height:48,borderRadius:16,background:`linear-gradient(135deg, ${C.gradientA}, ${C.gradientB})`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:25,color:"white"}}>✈</div>
           <div>
             <div style={{fontSize:24,fontWeight:850,color:C.text,letterSpacing:"-0.7px"}}>TravelShop</div>
             <div style={{fontSize:13,color:C.textMid}}>Entre para sincronizar PC e celular</div>
@@ -334,7 +336,9 @@ export default function App() {
   const [itensLegais, setItensLegais] = useState(_initItensLegais);
   const [gastos, setGastos] = useState(_initGastos); // gastos livres + produtos comprados espelhados
   const [parcelas, setParcelas] = useState([]);
-  const [planejamento, setPlanejamento] = useState({ dataInicio: "", dataFim: "", eventos: [] });
+  const [planejamento, setPlanejamento] = useState({ dataInicio:"", dataFim:"", eventos:[] });
+  const [checklist, setChecklist] = useState([]);
+  const [comprasDolar, setComprasDolar] = useState([]);
   const [showSettings, setShowSettings] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showGastoForm, setShowGastoForm] = useState(false);
@@ -372,14 +376,18 @@ export default function App() {
           itensLegais: [],
           gastos: [],
           parcelas: [],
-          planejamento: { dataInicio: "", dataFim: "", eventos: [] },
+          planejamento: { dataInicio:"", dataFim:"", eventos:[] },
+          checklist: [],
+          comprasDolar: [],
         });
         setSettings(INITIAL_SETTINGS);
         setProdutos(SAMPLE_PRODUTOS);
         setItensLegais([]);
         setGastos([]);
         setParcelas([]);
-        setPlanejamento({ dataInicio: "", dataFim: "", eventos: [] });
+        setPlanejamento({ dataInicio:"", dataFim:"", eventos:[] });
+        setChecklist([]);
+        setComprasDolar([]);
         setCloudReady(true);
         return;
       }
@@ -391,7 +399,9 @@ export default function App() {
       setItensLegais(cloudState.itensLegais);
       setGastos(cloudState.gastos);
       setParcelas(cloudState.parcelas || []);
-      setPlanejamento(cloudState.planejamento || { dataInicio: "", dataFim: "", eventos: [] });
+      setPlanejamento(cloudState.planejamento || { dataInicio:"", dataFim:"", eventos:[] });
+      setChecklist(cloudState.checklist || []);
+      setComprasDolar(cloudState.comprasDolar || []);
       setCloudReady(true);
     }, (error) => {
       console.error("Erro ao sincronizar com Firestore:", error);
@@ -411,7 +421,7 @@ export default function App() {
     }
 
     const timer = setTimeout(() => {
-      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento })
+      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar })
         .catch((error) => {
           console.error("Erro ao salvar no Firestore:", error);
           notify("Erro ao salvar na nuvem", "error");
@@ -419,7 +429,7 @@ export default function App() {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, cloudReady, userDocRef]);
+  }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, cloudReady, userDocRef]);
 
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
 
@@ -432,7 +442,9 @@ export default function App() {
       setItensLegais([]);
       setGastos([]);
       setParcelas([]);
-      setPlanejamento({ dataInicio: "", dataFim: "", eventos: [] });
+      setPlanejamento({ dataInicio:"", dataFim:"", eventos:[] });
+      setChecklist([]);
+      setComprasDolar([]);
       setCloudReady(false);
     } catch (e) {
       console.error("Erro ao sair:", e);
@@ -508,7 +520,7 @@ export default function App() {
   const pesoColor=pesoPercent<70?C.success:pesoPercent<90?C.warning:C.danger;
   const pesoBg=pesoPercent<70?C.successLight:pesoPercent<90?C.warningLight:C.dangerLight;
 
-  const TABS=[{label:"Início",icon:"⊞"},{label:"Produtos",icon:"📦"},{label:"Galeria",icon:"▦"},{label:"Gastos",icon:"💸"},{label:"Parcelas",icon:"💳"},{label:"Roteiro",icon:"🗓"},{label:"Stats",icon:"◈"},{label:"Calc",icon:"⟨⟩"}];
+  const TABS=["Início","Produtos","Galeria","Gastos","Parcelas","Roteiro","Stats","Calc"];
 
 
   if (!authReady) {
@@ -527,7 +539,7 @@ export default function App() {
       {notification&&<div className={`notif notif-${notification.type}`}>{notification.msg}</div>}
       <div style={S.header}>
         <div style={S.headerLeft}>
-          <img src="/image_a375cf.png" alt="TravelShop" style={{width:36,height:36,borderRadius:10,objectFit:"cover"}}/>
+          <div style={S.logoBox}>✈</div>
           <div>
             <div style={S.headerTitle}>TravelShop</div>
             <div style={S.headerSub}>Orlando 2027</div>
@@ -549,14 +561,14 @@ export default function App() {
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
         {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
         {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings}/>}
-        {tab===7&&<CalcTab settings={settings}/>}
+        {tab===7&&<CalcTab settings={settings} gastos={gastos} produtos={produtos} parcelas={parcelas} comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} checklist={checklist} setChecklist={setChecklist}/>}
       </div>
 
       <nav style={S.nav}>
-        {TABS.map((t,i)=>(
+        {TABS.map((label,i)=>(
           <button key={i} style={{...S.navBtn,...(tab===i?S.navBtnActive:{})}} onClick={()=>setTab(i)}>
-            <span style={{fontSize:18,lineHeight:1}}>{t.icon}</span>
-            <span style={S.navLabel}>{t.label}</span>
+            <NavIcon name={label} active={tab===i}/>
+            <span style={S.navLabel}>{label}</span>
             {tab===i&&<div style={S.navIndicator}/>}
           </button>
         ))}
@@ -912,6 +924,619 @@ function GastoForm({gasto,settings,onSave,onClose}) {
   );
 }
 
+
+
+// ─── NAV ICONS (SVG) ─────────────────────────────────────────────────────────
+function NavIcon({ name, active }) {
+  const col = active ? C.primary : C.textLight;
+  const w = 22, h = 22;
+  const icons = {
+    "Início": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <path d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5z" stroke={col} strokeWidth="1.8" strokeLinejoin="round" fill={active?col+"22":"none"}/>
+        <path d="M9 21V12h6v9" stroke={col} strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    ),
+    "Produtos": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z" stroke={col} strokeWidth="1.8" strokeLinejoin="round" fill={active?col+"22":"none"}/>
+        <line x1="3" y1="6" x2="21" y2="6" stroke={col} strokeWidth="1.8"/>
+        <path d="M16 10a4 4 0 0 1-8 0" stroke={col} strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    ),
+    "Galeria": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="3" width="8" height="8" rx="2" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <rect x="13" y="3" width="8" height="8" rx="2" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <rect x="3" y="13" width="8" height="8" rx="2" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <rect x="13" y="13" width="8" height="8" rx="2" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+      </svg>
+    ),
+    "Gastos": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <path d="M12 6v1m0 10v1M9.5 9.5C9.5 8.12 10.62 7 12 7s2.5 1.12 2.5 2.5c0 1.5-1.5 2-2.5 2.5-1 .5-2.5 1-2.5 2.5C9.5 15.88 10.62 17 12 17s2.5-1.12 2.5-2.5" stroke={col} strokeWidth="1.8" strokeLinecap="round"/>
+      </svg>
+    ),
+    "Parcelas": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <rect x="2" y="5" width="20" height="14" rx="3" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <path d="M2 10h20" stroke={col} strokeWidth="1.8"/>
+        <circle cx="7" cy="15" r="1.2" fill={col}/>
+        <circle cx="12" cy="15" r="1.2" fill={col}/>
+      </svg>
+    ),
+    "Roteiro": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <rect x="3" y="4" width="18" height="18" rx="3" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <path d="M16 2v4M8 2v4M3 10h18" stroke={col} strokeWidth="1.8" strokeLinecap="round"/>
+        <circle cx="8" cy="15" r="1.5" fill={col}/>
+        <circle cx="12" cy="15" r="1.5" fill={col}/>
+        <circle cx="16" cy="15" r="1.5" fill={col}/>
+      </svg>
+    ),
+    "Stats": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <path d="M18 20V10M12 20V4M6 20v-6" stroke={col} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
+        {active && <rect x="4" y="14" width="4" height="6" rx="1" fill={col+"33"}/>}
+        {active && <rect x="10" y="4" width="4" height="16" rx="1" fill={col+"33"}/>}
+        {active && <rect x="16" y="10" width="4" height="10" rx="1" fill={col+"33"}/>}
+      </svg>
+    ),
+    "Calc": (
+      <svg width={w} height={h} viewBox="0 0 24 24" fill="none">
+        <rect x="4" y="2" width="16" height="20" rx="3" stroke={col} strokeWidth="1.8" fill={active?col+"22":"none"}/>
+        <rect x="7" y="5" width="10" height="4" rx="1.5" fill={col} opacity="0.5"/>
+        <circle cx="8" cy="13" r="1.2" fill={col}/>
+        <circle cx="12" cy="13" r="1.2" fill={col}/>
+        <circle cx="16" cy="13" r="1.2" fill={col}/>
+        <circle cx="8" cy="17" r="1.2" fill={col}/>
+        <circle cx="12" cy="17" r="1.2" fill={col}/>
+        <rect x="14.5" y="15.5" width="3" height="3" rx="0.8" fill={col}/>
+      </svg>
+    ),
+  };
+  return icons[name] || <span style={{fontSize:18}}>{name[0]}</span>;
+}
+
+// ─── ROTEIRO TAB ──────────────────────────────────────────────────────────────
+function RoteiroTab({ planejamento, setPlanejamento }) {
+  const { dataInicio, dataFim, eventos } = planejamento;
+  const [showEventoForm, setShowEventoForm] = useState(false);
+  const [editEvento, setEditEvento] = useState(null);
+  const [mesCalendario, setMesCalendario] = useState(() => {
+    if (planejamento.dataInicio) return planejamento.dataInicio.slice(0, 7);
+    return new Date().toISOString().slice(0, 7);
+  });
+  const hoje = new Date().toISOString().slice(0, 10);
+  const eventosHoje = (eventos||[]).filter(e => e.data === hoje).sort((a,b) => (a.hora||"99:99").localeCompare(b.hora||"99:99"));
+  const viagemAtiva = dataInicio && dataFim && hoje >= dataInicio && hoje <= dataFim;
+  const diasRestantes = dataInicio && hoje < dataInicio ? Math.ceil((new Date(dataInicio) - new Date(hoje)) / 86400000) : null;
+
+  function salvarConfig(campo, valor) { setPlanejamento(p => ({ ...p, [campo]: valor })); }
+  function salvarEvento(ev) {
+    if (ev.id) { setPlanejamento(p => ({ ...p, eventos: p.eventos.map(e => e.id===ev.id?ev:e) })); }
+    else { setPlanejamento(p => ({ ...p, eventos: [...(p.eventos||[]), {...ev, id:Date.now()}] })); }
+    setShowEventoForm(false); setEditEvento(null);
+  }
+  function excluirEvento(id) { setPlanejamento(p => ({ ...p, eventos: p.eventos.filter(e => e.id!==id) })); }
+
+  const eventosPorData = useMemo(() => {
+    const map = {};
+    (eventos||[]).forEach(e => { if (!map[e.data]) map[e.data]=[]; map[e.data].push(e); });
+    Object.values(map).forEach(arr => arr.sort((a,b) => (a.hora||"99:99").localeCompare(b.hora||"99:99")));
+    return map;
+  }, [eventos]);
+
+  const datasViagem = useMemo(() => {
+    if (!dataInicio || !dataFim) return new Set();
+    const s = new Set(); const cur = new Date(dataInicio); const fim = new Date(dataFim);
+    while (cur <= fim) { s.add(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+    return s;
+  }, [dataInicio, dataFim]);
+
+  return (
+    <div style={S.page}>
+      <div style={S.heroCard}>
+        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Roteiro da viagem</div>
+        {viagemAtiva ? (
+          <div style={{fontSize:22,fontWeight:800,color:"#fff"}}>✈ Hoje é dia de viagem! 🎉</div>
+        ) : diasRestantes !== null ? (
+          <>
+            <div style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>{diasRestantes} dias</div>
+            <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:2}}>para a viagem começar 🗓</div>
+          </>
+        ) : (
+          <div style={{fontSize:20,fontWeight:700,color:"#fff"}}>Configure as datas abaixo</div>
+        )}
+        {eventosHoje.length > 0 && (
+          <div style={{marginTop:12,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"10px 12px"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.8)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Hoje</div>
+            {eventosHoje.map(e => (
+              <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                <span style={{fontSize:16}}>{e.emoji||"📌"}</span>
+                <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{e.titulo}</span>
+                {e.hora&&<span style={{fontSize:11,color:"rgba(255,255,255,0.7)"}}>às {e.hora}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>📅 Período da viagem</div>
+        <div style={{display:"flex",gap:10}}>
+          <div style={{flex:1}}><label style={S.label}>Ida</label><input style={S.input} type="date" value={dataInicio} onChange={e=>salvarConfig("dataInicio",e.target.value)}/></div>
+          <div style={{flex:1}}><label style={S.label}>Volta</label><input style={S.input} type="date" value={dataFim} onChange={e=>salvarConfig("dataFim",e.target.value)}/></div>
+        </div>
+        {dataInicio&&dataFim&&dataInicio<=dataFim&&(
+          <div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginTop:-4}}>
+            ✈ {Math.ceil((new Date(dataFim)-new Date(dataInicio))/86400000)+1} dias · {new Date(dataInicio+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})} → {new Date(dataFim+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}
+          </div>
+        )}
+      </div>
+
+      <CalendarioViagem mesCalendario={mesCalendario} onMesChange={setMesCalendario} datasViagem={datasViagem} eventosPorData={eventosPorData} hoje={hoje} dataInicio={dataInicio} dataFim={dataFim} onDiaClick={data=>{setEditEvento({data});setShowEventoForm(true);}}/>
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+        <div style={{fontWeight:700,fontSize:14,color:C.text}}>Eventos ({(eventos||[]).length})</div>
+        <button style={{...S.btnPrimary,padding:"7px 14px",fontSize:13,marginBottom:0,width:"auto"}} onClick={()=>{setEditEvento(null);setShowEventoForm(true);}}>＋ Evento</button>
+      </div>
+
+      {(eventos||[]).length===0&&<Empty text="Nenhum evento. Toque em ＋ ou clique em um dia no calendário."/>}
+
+      {Object.keys(eventosPorData).sort().map(data=>(
+        <div key={data} style={{marginBottom:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:C.textMid,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px",display:"flex",alignItems:"center",gap:6}}>
+            {new Date(data+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"short"})}
+            {data===hoje&&<span style={{background:C.primary,color:"#fff",borderRadius:999,padding:"1px 8px",fontSize:10}}>Hoje</span>}
+          </div>
+          {eventosPorData[data].map(e=>(
+            <div key={e.id} style={{...S.card,marginBottom:6,padding:"10px 14px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <div style={{width:36,height:36,borderRadius:10,background:C.primaryLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{e.emoji||"📌"}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontWeight:600,fontSize:14,color:C.text}}>{e.titulo}</div>
+                  <div style={{fontSize:12,color:C.textLight,marginTop:1}}>
+                    {e.hora&&<span>🕐 {e.hora}{e.horaFim?` → ${e.horaFim}`:""}{e.local?" · ":""}</span>}
+                    {e.local&&<span>📍 {e.local}</span>}
+                  </div>
+                  {e.notas&&<div style={{fontSize:12,color:C.textMid,marginTop:3}}>{e.notas}</div>}
+                </div>
+                <div style={{display:"flex",gap:6,flexShrink:0}}>
+                  <button style={{background:C.borderLight,border:"none",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:13}} onClick={()=>{setEditEvento(e);setShowEventoForm(true);}}>✏</button>
+                  <button style={{background:C.dangerLight,border:"none",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:13,color:C.danger}} onClick={()=>excluirEvento(e.id)}>🗑</button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {showEventoForm&&<EventoForm evento={editEvento} onSalvar={salvarEvento} onClose={()=>{setShowEventoForm(false);setEditEvento(null);}}/>}
+    </div>
+  );
+}
+
+function CalendarioViagem({mesCalendario,onMesChange,datasViagem,eventosPorData,hoje,dataInicio,dataFim,onDiaClick}) {
+  const [ano,mes] = mesCalendario.split("-").map(Number);
+  const primeiroDia = new Date(ano,mes-1,1).getDay();
+  const diasNoMes = new Date(ano,mes,0).getDate();
+  const nomeMes = new Date(ano,mes-1,1).toLocaleDateString("pt-BR",{month:"long",year:"numeric"});
+  function navMes(dir){const d=new Date(ano,mes-1+dir,1);onMesChange(d.toISOString().slice(0,7));}
+  const celulas=[];
+  for(let i=0;i<primeiroDia;i++) celulas.push(null);
+  for(let d=1;d<=diasNoMes;d++) celulas.push(d);
+  return (
+    <div style={{...S.card,marginBottom:14,padding:"14px 10px"}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+        <button onClick={()=>navMes(-1)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textMid,padding:"4px 10px"}}>‹</button>
+        <div style={{textAlign:"center"}}>
+          <div style={{fontWeight:700,fontSize:14,color:C.text,textTransform:"capitalize"}}>{nomeMes}</div>
+          {dataInicio&&mesCalendario!==dataInicio.slice(0,7)&&<button onClick={()=>onMesChange(dataInicio.slice(0,7))} style={{background:"none",border:"none",fontSize:11,color:C.primary,cursor:"pointer",fontWeight:600}}>Ir para viagem →</button>}
+        </div>
+        <button onClick={()=>navMes(1)} style={{background:"none",border:"none",fontSize:20,cursor:"pointer",color:C.textMid,padding:"4px 10px"}}>›</button>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:6}}>
+        {["D","S","T","Q","Q","S","S"].map((d,i)=><div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.textLight}}>{d}</div>)}
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+        {celulas.map((d,i)=>{
+          if(!d) return <div key={i}/>;
+          const ds=`${ano}-${String(mes).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+          const eV=datasViagem.has(ds),eH=ds===hoje,eI=ds===dataInicio,eF=ds===dataFim;
+          const qtEvs=(eventosPorData[ds]||[]).length;
+          return (
+            <button key={i} onClick={()=>onDiaClick(ds)} style={{
+              aspectRatio:"1",borderRadius:eI?"10px 4px 4px 10px":eF?"4px 10px 10px 4px":eV?"4px":"8px",
+              border:eH?`2px solid ${C.primary}`:"2px solid transparent",
+              background:eH?C.primary:eI||eF?C.primary:eV?C.primaryLight:"transparent",
+              color:eH||eI||eF?"#fff":eV?C.primary:C.text,
+              fontWeight:eH||eV?700:400,fontSize:13,cursor:"pointer",
+              display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"2px",
+            }}>
+              {d}
+              {qtEvs>0&&<div style={{width:qtEvs>1?14:5,height:4,borderRadius:999,background:eH||eI||eF?"rgba(255,255,255,0.8)":C.primary,marginTop:1,fontSize:8,display:"flex",alignItems:"center",justifyContent:"center",color:"#fff",fontWeight:700}}>{qtEvs>1?qtEvs:""}</div>}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{display:"flex",gap:12,marginTop:10,flexWrap:"wrap"}}>
+        {[{bg:C.primary,label:"Hoje/Chegada/Volta"},{bg:C.primaryLight,label:"Período da viagem"}].map(({bg,label})=>(
+          <div key={label} style={{display:"flex",alignItems:"center",gap:5}}><div style={{width:12,height:12,borderRadius:3,background:bg}}/><span style={{fontSize:10,color:C.textLight}}>{label}</span></div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const EMOJIS_EVENTO=["📌","✈","🏨","🎡","🛍","🍔","🎢","🌊","🎭","🚗","⛵","🎠","🎪","🎟","🏖","🌴","🎆","🎇","🎑","🎈"];
+function EventoForm({evento,onSalvar,onClose}) {
+  const [f,setF]=useState(evento?.id?{...evento}:{titulo:"",data:evento?.data||"",hora:"",horaFim:"",local:"",notas:"",emoji:"📌"});
+  function salvar(){if(!f.titulo.trim())return alert("Informe o título");if(!f.data)return alert("Informe a data");onSalvar({...f,titulo:f.titulo.trim()});}
+  return (
+    <Modal title={evento?.id?"Editar evento":"Novo evento"} onClose={onClose}>
+      <label style={S.label}>Ícone</label>
+      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
+        {EMOJIS_EVENTO.map(e=><button key={e} onClick={()=>setF(p=>({...p,emoji:e}))} style={{width:36,height:36,borderRadius:8,border:`2px solid ${f.emoji===e?C.primary:C.border}`,background:f.emoji===e?C.primaryLight:"transparent",fontSize:18,cursor:"pointer"}}>{e}</button>)}
+      </div>
+      <label style={S.label}>Título *</label>
+      <input style={S.input} placeholder="Ex: Universal Studios..." value={f.titulo} onChange={e=>setF(p=>({...p,titulo:e.target.value}))}/>
+      <label style={S.label}>Data *</label>
+      <input style={S.input} type="date" value={f.data} onChange={e=>setF(p=>({...p,data:e.target.value}))}/>
+      <div style={{display:"flex",gap:10}}>
+        <div style={{flex:1}}><label style={S.label}>Início (opcional)</label><input style={S.input} type="time" value={f.hora} onChange={e=>setF(p=>({...p,hora:e.target.value}))}/></div>
+        <div style={{flex:1}}><label style={S.label}>Fim (opcional)</label><input style={S.input} type="time" value={f.horaFim} onChange={e=>setF(p=>({...p,horaFim:e.target.value}))}/></div>
+      </div>
+      <label style={S.label}>Local (opcional)</label>
+      <input style={S.input} placeholder="Ex: Universal Orlando Resort" value={f.local} onChange={e=>setF(p=>({...p,local:e.target.value}))}/>
+      <label style={S.label}>Notas (opcional)</label>
+      <input style={S.input} placeholder="Ex: Reserva confirmada..." value={f.notas} onChange={e=>setF(p=>({...p,notas:e.target.value}))}/>
+      <button style={S.btnPrimary} onClick={salvar}>{evento?.id?"Salvar alterações":"Adicionar evento"}</button>
+    </Modal>
+  );
+}
+
+// ─── CALC TAB (extendida: Simulador + Histórico Dólar + Checklist + Bagagem) ──
+function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setComprasDolar, checklist, setChecklist}) {
+  const [subTab, setSubTab] = useState("conversor");
+  const SUBTABS = [
+    {id:"conversor",label:"💱 Câmbio"},
+    {id:"simulador",label:"💰 Simulador"},
+    {id:"dolar",label:"📈 Meu Dólar"},
+    {id:"bagagem",label:"⚖ Bagagem"},
+    {id:"checklist",label:"✅ Checklist"},
+  ];
+  return (
+    <div style={S.page}>
+      <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:4,marginBottom:14}}>
+        {SUBTABS.map(t=>(
+          <button key={t.id} onClick={()=>setSubTab(t.id)} style={{...S.chip,...(subTab===t.id?S.chipActive:{}),whiteSpace:"nowrap",flexShrink:0,fontSize:12,padding:"6px 12px"}}>{t.label}</button>
+        ))}
+      </div>
+      {subTab==="conversor"&&<ConversorTab settings={settings}/>}
+      {subTab==="simulador"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas}/>}
+      {subTab==="dolar"&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
+      {subTab==="bagagem"&&<BagagemTab produtos={produtos} settings={settings}/>}
+      {subTab==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
+    </div>
+  );
+}
+
+// ─── CONVERSOR (era CalcTab original) ────────────────────────────────────────
+function ConversorTab({settings}) {
+  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState("");
+  const dolarAj=calcDolarAjustado(settings); const brlP=parseFloat(usdN)*(1+settings.taxa/100)*dolarAj; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*(1+settings.taxa/100)*parseFloat(dc):null;
+  return (
+    <>
+      <div style={S.sectionLabel}>💵 Conversor USD → BRL</div>
+      <div style={S.card}>
+        <label style={S.label}>Valor em USD</label>
+        <input style={S.input} type="number" placeholder="Ex: 150" value={usdN} onChange={e=>setUsdN(e.target.value)}/>
+        {usdN&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>BRL estimado</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brlP)}</span></div>}
+        <label style={{...S.label,marginTop:8}}>Dólar que você pagou (opcional)</label>
+        <input style={S.input} type="number" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
+        {brlC&&parseFloat(usdN)>0&&[{label:"Com seu dólar",value:fmtBRL(brlC),color:C.success},{label:"Diferença",value:fmtBRL(brlP-brlC),color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
+          <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{label}</span><span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span></div>
+        ))}
+      </div>
+      <div style={S.sectionLabel}>⚖ Conversor de Peso</div>
+      <div style={S.card}>
+        <label style={S.label}>Libras (lbs)</label>
+        <input style={S.input} type="number" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
+        {lbs&&[[`Gramas`,`${fmtN(parseFloat(lbs)*453.592,1)}g`],[`Kg`,`${fmtN(parseFloat(lbs)*0.453592,3)}kg`],["Oz",`${fmtN(parseFloat(lbs)*16,1)} oz`]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+        <div style={{height:12}}/>
+        <label style={S.label}>Onças (oz)</label>
+        <input style={S.input} type="number" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
+        {oz&&[["Gramas",`${fmtN(parseFloat(oz)*28.3495,1)}g`],["Kg",`${fmtN(parseFloat(oz)*28.3495/1000,3)}kg`],["Libras",`${fmtN(parseFloat(oz)/16,3)} lbs`]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+      </div>
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
+        {[["Dólar pago",fmtBRL(settings.dollarPago,4)],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",fmtBRL(dolarAj,4)]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+        <BcbRate/>
+      </div>
+    </>
+  );
+}
+
+// ─── SIMULADOR ───────────────────────────────────────────────────────────────
+function SimuladorTab({settings, gastos, parcelas}) {
+  const totalGastosUSD = calcTotalGastosUSD(gastos);
+  const totalParcelasMensal = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte||p.valorParcela)||0)/parseInt(p.quantidadeParcelas||1),0);
+  const totalParcelasBRL = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0),0);
+  const parcelasRestBRL = parcelas.reduce((a,p)=>{
+    const qt=parseInt(p.quantidadeParcelas)||0; const pagas=(p.statusMensal||[]).filter(Boolean).length;
+    return a+Math.max(0,qt-pagas)*(parseFloat(p.minhaParte||p.valorParcela)||0)/qt;
+  },0)*parcelas.reduce((a,p)=>{const qt=parseInt(p.quantidadeParcelas)||0;const pagas=(p.statusMensal||[]).filter(Boolean).length;return a+Math.max(0,qt-pagas);},0)/Math.max(1,parcelas.reduce((a,p)=>{const qt=parseInt(p.quantidadeParcelas)||0;return a+qt;},0));
+  const totalParcelasRestBRL = parcelas.reduce((a,p)=>{
+    const qt=parseInt(p.quantidadeParcelas)||0; const pagas=(p.statusMensal||[]).filter(Boolean).length; const vp=parseFloat(p.minhaParte&&p.valorTotal?(p.minhaParte/p.valorTotal)*(p.valorParcela||0):p.valorParcela)||0;
+    return a+Math.max(0,qt-pagas)*vp;
+  },0);
+  const usdGastosEmBRL = totalGastosUSD * settings.dollarPago;
+  const totalViagem = usdGastosEmBRL + totalParcelasRestBRL;
+
+  return (
+    <>
+      <div style={{...S.heroCard,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Custo total estimado da viagem</div>
+        <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px"}}>{fmtBRL(totalViagem)}</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:3}}>gastos lá + parcelas restantes</div>
+      </div>
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Composição do custo</div>
+        {[
+          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × R$ ${fmtN(settings.dollarPago,2)}`},
+          {label:"💳 Parcelas restantes (BRL)",value:fmtBRL(totalParcelasRestBRL),color:C.purple,sub:`${parcelas.filter(p=>(p.statusMensal||[]).some(s=>!s)).length} itens com parcelas a pagar`},
+          {label:"📊 Total comprometido",value:fmtBRL(totalViagem),color:C.text,sub:""},
+        ].map(({label,value,color,sub})=>(
+          <div key={label} style={{padding:"10px 0",borderBottom:`1px solid ${C.borderLight}`}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <span style={{fontSize:13,color:C.textMid,fontWeight:600}}>{label}</span>
+              <span style={{fontSize:14,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
+            </div>
+            {sub&&<div style={{fontSize:11,color:C.textLight,marginTop:2}}>{sub}</div>}
+          </div>
+        ))}
+      </div>
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:8}}>💵 Dólar para levar</div>
+        <div style={{fontSize:12,color:C.textMid,marginBottom:10}}>Baseado nos produtos pendentes e gastos estimados</div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0"}}>
+          <span style={{fontSize:13,color:C.textMid}}>Budget configurado</span>
+          <span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(settings.totalDolarViagem)}</span>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0"}}>
+          <span style={{fontSize:13,color:C.textMid}}>Já gastou</span>
+          <span style={{fontSize:13,fontWeight:700,color:C.danger,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(totalGastosUSD)}</span>
+        </div>
+        <div style={{height:1,background:C.border,margin:"4px 0"}}/>
+        <div style={{display:"flex",justifyContent:"space-between",padding:"8px 0"}}>
+          <span style={{fontSize:13,fontWeight:700,color:C.text}}>Ainda disponível</span>
+          <span style={{fontSize:15,fontWeight:800,color:settings.totalDolarViagem-totalGastosUSD>=0?C.success:C.danger,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(Math.abs(settings.totalDolarViagem-totalGastosUSD))}{settings.totalDolarViagem-totalGastosUSD<0?" (excedido)":""}</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ─── HISTÓRICO DÓLAR ─────────────────────────────────────────────────────────
+function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
+  const [showForm, setShowForm] = useState(false);
+  const [f, setF] = useState({data:"",quantidade:"",cotacao:"",obs:""});
+  const totalUSD = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0),0);
+  const totalBRL = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0)*(parseFloat(c.cotacao)||0),0);
+  const custoMedio = totalUSD>0 ? totalBRL/totalUSD : 0;
+  const cotacaoAtual = settings.dollarPago;
+
+  function salvar(){
+    if(!f.quantidade||!f.cotacao||!f.data) return alert("Preencha data, quantidade e cotação");
+    setComprasDolar(ps=>[...ps,{...f,id:Date.now(),quantidade:parseFloat(f.quantidade),cotacao:parseFloat(f.cotacao)}]);
+    setF({data:"",quantidade:"",cotacao:"",obs:""}); setShowForm(false);
+  }
+
+  return (
+    <>
+      <div style={{...S.heroCard,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Dólar acumulado</div>
+        <div style={{fontSize:28,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>{fmtUSD(totalUSD)}</div>
+        <div style={{display:"flex",gap:10,marginTop:10}}>
+          <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Custo médio</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtBRL(custoMedio,4)}</div>
+          </div>
+          <div style={{background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Total investido</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtBRL(totalBRL)}</div>
+          </div>
+          <div style={{background:custoMedio>cotacaoAtual?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>{custoMedio>cotacaoAtual?"Acima":"Abaixo"} atual</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{custoMedio>0?`${custoMedio>cotacaoAtual?"+":"-"}${fmtBRL(Math.abs(custoMedio-cotacaoAtual),4)}`:"—"}</div>
+          </div>
+        </div>
+      </div>
+
+      <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
+        {showForm?"Cancelar":"＋ Registrar compra de dólar"}
+      </button>
+
+      {showForm&&(
+        <div style={{...S.card,marginBottom:14}}>
+          <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Nova compra</div>
+          <label style={S.label}>Data</label>
+          <input style={S.input} type="date" value={f.data} onChange={e=>setF(p=>({...p,data:e.target.value}))}/>
+          <div style={{display:"flex",gap:10}}>
+            <div style={{flex:1}}><label style={S.label}>Quantidade (US$)</label><input style={S.input} type="number" step="50" placeholder="Ex: 500" value={f.quantidade} onChange={e=>setF(p=>({...p,quantidade:e.target.value}))}/></div>
+            <div style={{flex:1}}><label style={S.label}>Cotação (R$)</label><input style={S.input} type="number" step="0.01" placeholder="Ex: 5.65" value={f.cotacao} onChange={e=>setF(p=>({...p,cotacao:e.target.value}))}/></div>
+          </div>
+          {f.quantidade&&f.cotacao&&<div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginBottom:12}}>Total: {fmtBRL(parseFloat(f.quantidade)*parseFloat(f.cotacao))}</div>}
+          <label style={S.label}>Observação (opcional)</label>
+          <input style={S.input} placeholder="Ex: Wise, Banco do Brasil..." value={f.obs} onChange={e=>setF(p=>({...p,obs:e.target.value}))}/>
+          <button style={S.btnPrimary} onClick={salvar}>Salvar</button>
+        </div>
+      )}
+
+      {comprasDolar.length===0&&<Empty text="Nenhuma compra registrada ainda."/>}
+      {[...comprasDolar].reverse().map(c=>(
+        <div key={c.id} style={{...S.card,marginBottom:8,padding:"10px 14px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{fontWeight:600,fontSize:14,color:C.text}}>{fmtUSD(c.quantidade)}</div>
+              <div style={{fontSize:12,color:C.textLight,marginTop:1}}>{c.data?new Date(c.data+"T12:00:00").toLocaleDateString("pt-BR"):""}{c.obs?` · ${c.obs}`:""}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:13,fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(parseFloat(c.cotacao),4)}/US$</div>
+              <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(c.quantidade*c.cotacao)}</div>
+            </div>
+            <button onClick={()=>setComprasDolar(ps=>ps.filter(p=>p.id!==c.id))} style={{background:C.dangerLight,border:"none",borderRadius:6,width:24,height:24,cursor:"pointer",color:C.danger,fontSize:12,marginLeft:8,flexShrink:0}}>✕</button>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+// ─── BAGAGEM VISUAL ──────────────────────────────────────────────────────────
+function BagagemTab({produtos, settings}) {
+  const pesoMax = settings.pesoMax;
+  const categorias = [
+    {label:"📱 Eletrônicos",lojas:["Apple","Best Buy","Newegg"],cor:C.primary},
+    {label:"👗 Roupas",lojas:["Tommy Hilfiger","Calvin Klein","The North Face","Marshalls","Ross","TJ Maxx"],cor:C.purple},
+    {label:"💧 Líquidos",tipo:"liquido",cor:C.success},
+    {label:"🛍 Outros",cor:C.warning},
+  ];
+  const pesoTotal = produtos.filter(p=>p.status==="comprado").reduce((a,p)=>a+pesoGramas(p),0);
+  const pct = Math.min(100,(pesoTotal/pesoMax)*100);
+  const cor = pct<70?C.success:pct<90?C.warning:C.danger;
+
+  const porCategoria = categorias.map(cat=>{
+    const itens = produtos.filter(p=>p.status==="comprado"&&(
+      cat.tipo ? p.tipo===cat.tipo :
+      cat.lojas ? cat.lojas.includes(p.loja) :
+      true
+    ));
+    const peso = itens.reduce((a,p)=>a+pesoGramas(p),0);
+    return {...cat, peso, itens:itens.length};
+  });
+  // "Outros" = total - categorias específicas
+  const pesoCategorizado = porCategoria.slice(0,-1).reduce((a,c)=>a+c.peso,0);
+  porCategoria[porCategoria.length-1].peso = Math.max(0, pesoTotal - pesoCategorizado);
+
+  return (
+    <>
+      <div style={{...S.heroCard,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Peso da mala</div>
+        <div style={{fontSize:28,fontWeight:800,color:"#fff"}}>{fmtN(pesoTotal/1000,2)} kg <span style={{fontSize:14,opacity:0.75}}>/ {fmtN(pesoMax/1000,0)} kg</span></div>
+        <div style={{marginTop:12,background:"rgba(255,255,255,0.2)",borderRadius:999,height:12,overflow:"hidden"}}>
+          <div style={{width:`${pct}%`,height:"100%",background:pct<70?"#34D399":pct<90?"#FBBF24":"#F87171",borderRadius:999,transition:"width 0.5s"}}/>
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:4}}>
+          <span style={{fontSize:11,color:"rgba(255,255,255,0.7)"}}>{fmtN(pct,0)}% usado</span>
+          <span style={{fontSize:11,color:"rgba(255,255,255,0.7)"}}>Disponível: {fmtN((pesoMax-pesoTotal)/1000,2)} kg</span>
+        </div>
+      </div>
+
+      {pct>=90&&<div style={{background:C.dangerLight,border:`1px solid ${C.danger}33`,borderRadius:12,padding:"10px 14px",fontSize:13,color:C.danger,fontWeight:600,marginBottom:12}}>⚠ Atenção! Mala com {fmtN(pct,0)}% da capacidade.</div>}
+
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Por categoria (itens comprados)</div>
+        {porCategoria.map(cat=>{
+          const pCat = pesoTotal>0?cat.peso/pesoTotal*100:0;
+          return (
+            <div key={cat.label} style={{marginBottom:10}}>
+              <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{fontSize:13,color:C.text,fontWeight:600}}>{cat.label}</span>
+                <span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtN(cat.peso/1000,2)} kg</span>
+              </div>
+              <div style={{height:6,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
+                <div style={{width:`${pCat}%`,height:"100%",background:cat.cor,borderRadius:999,transition:"width 0.5s"}}/>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={S.card}>
+        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Top 5 mais pesados</div>
+        {[...produtos.filter(p=>p.status==="comprado")].sort((a,b)=>pesoGramas(b)-pesoGramas(a)).slice(0,5).map(p=>(
+          <div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
+            <span style={{fontSize:13,color:C.text,fontWeight:500}}>{p.nome}</span>
+            <span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtN(pesoGramas(p)/1000,3)} kg</span>
+          </div>
+        ))}
+        {produtos.filter(p=>p.status==="comprado").length===0&&<div style={{fontSize:13,color:C.textLight,textAlign:"center",padding:"12px 0"}}>Nenhum item comprado ainda</div>}
+      </div>
+    </>
+  );
+}
+
+// ─── CHECKLIST ───────────────────────────────────────────────────────────────
+const CHECKLIST_DEFAULTS = [
+  {cat:"📋 Documentos",items:["Passaporte válido","Visto americano (ESTA)","Seguro viagem","Cartão de crédito internacional","Comprovante de reserva hotel","Passagens impressas"]},
+  {cat:"💊 Saúde",items:["Vacinas em dia","Remédios prescritos","Protetor solar","Repelente"]},
+  {cat:"💰 Financeiro",items:["Dólar em espécie","Avisar o banco sobre viagem","Baixar app do banco","Checar limite do cartão"]},
+  {cat:"📱 Tecnologia",items:["Adaptador de tomada","Carregadores","Power bank","Câmera/memória","Chip internacional / eSIM"]},
+  {cat:"🧳 Mala",items:["Roupas para o clima","Calçado confortável","Necessaire","Cadeado para mala"]},
+];
+
+function ChecklistTab({checklist, setChecklist}) {
+  const [initialized, setInitialized] = useState(false);
+
+  useEffect(()=>{
+    if(checklist.length===0 && !initialized) {
+      const defaults = CHECKLIST_DEFAULTS.flatMap(g=>g.items.map(item=>({id:Date.now()+Math.random(),texto:item,cat:g.cat,feito:false})));
+      setChecklist(defaults);
+      setInitialized(true);
+    }
+  },[]);
+
+  function toggle(id) { setChecklist(ps=>ps.map(p=>p.id===id?{...p,feito:!p.feito}:p)); }
+  function remover(id) { setChecklist(ps=>ps.filter(p=>p.id!==id)); }
+
+  const cats = [...new Set(checklist.map(p=>p.cat))];
+  const feitos = checklist.filter(p=>p.feito).length;
+  const pct = checklist.length>0?Math.round(feitos/checklist.length*100):0;
+
+  return (
+    <>
+      <div style={{...S.heroCard,marginBottom:14}}>
+        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Checklist pré-viagem</div>
+        <div style={{fontSize:28,fontWeight:800,color:"#fff"}}>{feitos}/{checklist.length} <span style={{fontSize:14,opacity:0.75}}>itens</span></div>
+        <div style={{marginTop:10,background:"rgba(255,255,255,0.2)",borderRadius:999,height:10,overflow:"hidden"}}>
+          <div style={{width:`${pct}%`,height:"100%",background:pct===100?"#34D399":"#fff",borderRadius:999,transition:"width 0.5s"}}/>
+        </div>
+        {pct===100&&<div style={{marginTop:8,fontSize:14,fontWeight:700,color:"#fff"}}>✅ Tudo pronto para a viagem!</div>}
+      </div>
+
+      {cats.map(cat=>{
+        const itens = checklist.filter(p=>p.cat===cat);
+        const feitosCat = itens.filter(p=>p.feito).length;
+        return (
+          <div key={cat} style={{...S.card,marginBottom:10}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div style={{fontWeight:700,fontSize:13,color:C.text}}>{cat}</div>
+              <span style={{fontSize:11,color:C.textLight,fontWeight:600}}>{feitosCat}/{itens.length}</span>
+            </div>
+            {itens.map(item=>(
+              <div key={item.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:`1px solid ${C.borderLight}`}}>
+                <button onClick={()=>toggle(item.id)} style={{...S.checkbox,...(item.feito?S.checkboxDone:{})}}>
+                  {item.feito&&<svg width="12" height="12" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}
+                </button>
+                <span style={{fontSize:13,color:item.feito?C.textLight:C.text,textDecoration:item.feito?"line-through":"none",flex:1}}>{item.texto}</span>
+                <button onClick={()=>remover(item.id)} style={{background:"none",border:"none",color:C.textXLight,cursor:"pointer",fontSize:14,padding:"0 4px"}}>✕</button>
+              </div>
+            ))}
+          </div>
+        );
+      })}
+    </>
+  );
+}
 
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
 const MESES_LABELS = ["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
@@ -1291,347 +1916,6 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       )}
 
       <button style={S.btnPrimary} onClick={salvar}>{parcela ? "Salvar alterações" : "Adicionar parcela"}</button>
-    </Modal>
-  );
-}
-
-
-// ─── ROTEIRO TAB ──────────────────────────────────────────────────────────────
-function RoteiroTab({ planejamento, setPlanejamento }) {
-  const { dataInicio, dataFim, eventos } = planejamento;
-  const [showEventoForm, setShowEventoForm] = useState(false);
-  const [editEvento, setEditEvento] = useState(null);
-  const [mesCalendario, setMesCalendario] = useState(() => {
-    if (planejamento.dataInicio) return planejamento.dataInicio.slice(0, 7);
-    return new Date().toISOString().slice(0, 7);
-  });
-
-  const hoje = new Date().toISOString().slice(0, 10);
-
-  // Eventos do dia de hoje
-  const eventosHoje = eventos.filter(e => e.data === hoje).sort((a,b) => (a.hora||"99:99").localeCompare(b.hora||"99:99"));
-
-  // Verificar se hoje está dentro do período da viagem
-  const viagemAtiva = dataInicio && dataFim && hoje >= dataInicio && hoje <= dataFim;
-  const viagemFutura = dataInicio && hoje < dataInicio;
-  const diasRestantes = dataInicio ? Math.ceil((new Date(dataInicio) - new Date(hoje)) / 86400000) : null;
-
-  function salvarConfig(campo, valor) {
-    setPlanejamento(p => ({ ...p, [campo]: valor }));
-  }
-
-  function salvarEvento(ev) {
-    if (ev.id) {
-      setPlanejamento(p => ({ ...p, eventos: p.eventos.map(e => e.id === ev.id ? ev : e) }));
-    } else {
-      setPlanejamento(p => ({ ...p, eventos: [...p.eventos, { ...ev, id: Date.now() }] }));
-    }
-    setShowEventoForm(false);
-    setEditEvento(null);
-  }
-
-  function excluirEvento(id) {
-    setPlanejamento(p => ({ ...p, eventos: p.eventos.filter(e => e.id !== id) }));
-  }
-
-  // Agrupar eventos por data para exibição
-  const eventosPorData = useMemo(() => {
-    const map = {};
-    eventos.forEach(e => {
-      if (!map[e.data]) map[e.data] = [];
-      map[e.data].push(e);
-    });
-    Object.values(map).forEach(arr => arr.sort((a,b) => (a.hora||"99:99").localeCompare(b.hora||"99:99")));
-    return map;
-  }, [eventos]);
-
-  // Datas do período da viagem
-  const datasViagem = useMemo(() => {
-    if (!dataInicio || !dataFim) return new Set();
-    const datas = new Set();
-    const cur = new Date(dataInicio);
-    const fim = new Date(dataFim);
-    while (cur <= fim) {
-      datas.add(cur.toISOString().slice(0, 10));
-      cur.setDate(cur.getDate() + 1);
-    }
-    return datas;
-  }, [dataInicio, dataFim]);
-
-  return (
-    <div style={S.page}>
-      {/* Hero / Status */}
-      <div style={S.heroCard}>
-        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Roteiro da viagem</div>
-        {viagemAtiva ? (
-          <>
-            <div style={{fontSize:22,fontWeight:800,color:"#fff"}}>✈ Hoje é dia de viagem!</div>
-            <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:4}}>Aproveite cada momento 🎉</div>
-          </>
-        ) : viagemFutura && diasRestantes !== null ? (
-          <>
-            <div style={{fontSize:26,fontWeight:800,color:"#fff",letterSpacing:"-0.5px"}}>{diasRestantes} dias</div>
-            <div style={{fontSize:13,color:"rgba(255,255,255,0.8)",marginTop:2}}>para a viagem começar 🗓</div>
-          </>
-        ) : (
-          <>
-            <div style={{fontSize:20,fontWeight:700,color:"#fff"}}>Planeje sua viagem</div>
-            <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:2}}>Configure as datas abaixo</div>
-          </>
-        )}
-        {/* Eventos de hoje */}
-        {eventosHoje.length > 0 && (
-          <div style={{marginTop:12,background:"rgba(255,255,255,0.15)",borderRadius:12,padding:"10px 12px"}}>
-            <div style={{fontSize:11,fontWeight:700,color:"rgba(255,255,255,0.8)",marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>Programação de hoje</div>
-            {eventosHoje.map(e => (
-              <div key={e.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
-                <span style={{fontSize:16}}>{e.emoji||"📌"}</span>
-                <div>
-                  <span style={{fontSize:13,fontWeight:600,color:"#fff"}}>{e.titulo}</span>
-                  {e.hora && <span style={{fontSize:11,color:"rgba(255,255,255,0.7)",marginLeft:6}}>às {e.hora}</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Configurar período */}
-      <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>📅 Período da viagem</div>
-        <div style={{display:"flex",gap:10}}>
-          <div style={{flex:1}}>
-            <label style={S.label}>Data de ida</label>
-            <input style={S.input} type="date" value={dataInicio} onChange={e => salvarConfig("dataInicio", e.target.value)}/>
-          </div>
-          <div style={{flex:1}}>
-            <label style={S.label}>Data de volta</label>
-            <input style={S.input} type="date" value={dataFim} onChange={e => salvarConfig("dataFim", e.target.value)}/>
-          </div>
-        </div>
-        {dataInicio && dataFim && dataInicio <= dataFim && (
-          <div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginTop:4}}>
-            ✈ {Math.ceil((new Date(dataFim) - new Date(dataInicio)) / 86400000) + 1} dias de viagem · {new Date(dataInicio+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short"})} → {new Date(dataFim+"T12:00:00").toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}
-          </div>
-        )}
-      </div>
-
-      {/* Calendário */}
-      <CalendarioViagem
-        mesCalendario={mesCalendario}
-        onMesChange={setMesCalendario}
-        datasViagem={datasViagem}
-        eventosPorData={eventosPorData}
-        hoje={hoje}
-        dataInicio={dataInicio}
-        dataFim={dataFim}
-        onDiaClick={data => { setEditEvento({ data }); setShowEventoForm(true); }}
-      />
-
-      {/* Lista de eventos */}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10,marginTop:4}}>
-        <div style={{fontWeight:700,fontSize:14,color:C.text}}>Eventos ({eventos.length})</div>
-        <button style={{...S.btnPrimary,padding:"7px 14px",fontSize:13,marginBottom:0}} onClick={() => { setEditEvento(null); setShowEventoForm(true); }}>＋ Evento</button>
-      </div>
-
-      {eventos.length === 0 && <Empty text="Nenhum evento ainda. Toque em ＋ Evento ou clique em um dia no calendário."/>}
-
-      {Object.keys(eventosPorData).sort().map(data => (
-        <div key={data} style={{marginBottom:12}}>
-          <div style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6,textTransform:"uppercase",letterSpacing:"0.5px"}}>
-            {new Date(data+"T12:00:00").toLocaleDateString("pt-BR",{weekday:"short",day:"2-digit",month:"short",year:"numeric"})}
-            {data === hoje && <span style={{marginLeft:6,background:C.primary,color:"#fff",borderRadius:999,padding:"1px 8px",fontSize:10}}>Hoje</span>}
-          </div>
-          {eventosPorData[data].map(e => (
-            <div key={e.id} style={{...S.card,marginBottom:6,padding:"10px 14px"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <div style={{width:36,height:36,borderRadius:10,background:C.primaryLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>{e.emoji||"📌"}</div>
-                <div style={{flex:1}}>
-                  <div style={{fontWeight:600,fontSize:14,color:C.text}}>{e.titulo}</div>
-                  <div style={{fontSize:12,color:C.textLight,marginTop:1}}>
-                    {e.hora && <span>🕐 {e.hora}{e.horaFim?` → ${e.horaFim}`:""} · </span>}
-                    {e.local && <span>📍 {e.local}</span>}
-                  </div>
-                  {e.notas && <div style={{fontSize:12,color:C.textMid,marginTop:3}}>{e.notas}</div>}
-                </div>
-                <div style={{display:"flex",gap:6,flexShrink:0}}>
-                  <button style={{background:C.borderLight,border:"none",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:13}} onClick={() => { setEditEvento(e); setShowEventoForm(true); }}>✏</button>
-                  <button style={{background:C.dangerLight,border:"none",borderRadius:7,width:28,height:28,cursor:"pointer",fontSize:13,color:C.danger}} onClick={() => excluirEvento(e.id)}>🗑</button>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {showEventoForm && (
-        <EventoForm
-          evento={editEvento}
-          onSalvar={salvarEvento}
-          onClose={() => { setShowEventoForm(false); setEditEvento(null); }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ─── CALENDÁRIO ───────────────────────────────────────────────────────────────
-function CalendarioViagem({ mesCalendario, onMesChange, datasViagem, eventosPorData, hoje, dataInicio, dataFim, onDiaClick }) {
-  const [ano, mes] = mesCalendario.split("-").map(Number);
-  const primeiroDia = new Date(ano, mes - 1, 1).getDay(); // 0=dom
-  const diasNoMes = new Date(ano, mes, 0).getDate();
-  const nomeMes = new Date(ano, mes - 1, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-
-  function navMes(dir) {
-    const d = new Date(ano, mes - 1 + dir, 1);
-    onMesChange(d.toISOString().slice(0, 7));
-  }
-
-  // Ir para mês da viagem se configurado
-  function irParaViagem() {
-    if (dataInicio) onMesChange(dataInicio.slice(0, 7));
-  }
-
-  const celulas = [];
-  for (let i = 0; i < primeiroDia; i++) celulas.push(null);
-  for (let d = 1; d <= diasNoMes; d++) celulas.push(d);
-
-  return (
-    <div style={{...S.card,marginBottom:14,padding:"14px 10px"}}>
-      {/* Header do calendário */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-        <button onClick={() => navMes(-1)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.textMid,padding:"4px 8px"}}>‹</button>
-        <div style={{textAlign:"center"}}>
-          <div style={{fontWeight:700,fontSize:14,color:C.text,textTransform:"capitalize"}}>{nomeMes}</div>
-          {dataInicio && mesCalendario !== dataInicio.slice(0,7) && (
-            <button onClick={irParaViagem} style={{background:"none",border:"none",fontSize:11,color:C.primary,cursor:"pointer",fontWeight:600}}>Ir para viagem →</button>
-          )}
-        </div>
-        <button onClick={() => navMes(1)} style={{background:"none",border:"none",fontSize:18,cursor:"pointer",color:C.textMid,padding:"4px 8px"}}>›</button>
-      </div>
-
-      {/* Labels dias da semana */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",marginBottom:4}}>
-        {["D","S","T","Q","Q","S","S"].map((d,i) => (
-          <div key={i} style={{textAlign:"center",fontSize:10,fontWeight:700,color:C.textLight,padding:"2px 0"}}>{d}</div>
-        ))}
-      </div>
-
-      {/* Células */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
-        {celulas.map((d, i) => {
-          if (!d) return <div key={i}/>;
-          const dataStr = `${ano}-${String(mes).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
-          const eViagem = datasViagem.has(dataStr);
-          const eHoje = dataStr === hoje;
-          const eInicio = dataStr === dataInicio;
-          const eFim = dataStr === dataFim;
-          const qtEvs = (eventosPorData[dataStr] || []).length;
-
-          return (
-            <button key={i} onClick={() => onDiaClick(dataStr)} style={{
-              position:"relative",
-              aspectRatio:"1",
-              borderRadius: eInicio ? "10px 4px 4px 10px" : eFim ? "4px 10px 10px 4px" : eViagem ? "4px" : "8px",
-              border: eHoje ? `2px solid ${C.primary}` : "2px solid transparent",
-              background: eHoje ? C.primary : eInicio || eFim ? C.primary : eViagem ? C.primaryLight : "transparent",
-              color: eHoje || eInicio || eFim ? "#fff" : eViagem ? C.primary : C.text,
-              fontWeight: eHoje || eViagem ? 700 : 400,
-              fontSize: 13,
-              cursor:"pointer",
-              display:"flex",
-              flexDirection:"column",
-              alignItems:"center",
-              justifyContent:"center",
-              padding:"2px",
-            }}>
-              {d}
-              {qtEvs > 0 && (
-                <div style={{
-                  width: qtEvs > 1 ? 14 : 6,
-                  height: 4,
-                  borderRadius: 999,
-                  background: eHoje || eInicio || eFim ? "rgba(255,255,255,0.8)" : C.primary,
-                  marginTop: 1,
-                  fontSize: 8,
-                  display:"flex",
-                  alignItems:"center",
-                  justifyContent:"center",
-                  color: eHoje ? C.primary : "#fff",
-                  fontWeight:700,
-                }}>{qtEvs > 1 ? qtEvs : ""}</div>
-              )}
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Legenda */}
-      <div style={{display:"flex",gap:12,marginTop:10,flexWrap:"wrap"}}>
-        {[
-          {bg:C.primary,color:"#fff",label:"Hoje / Chegada / Volta"},
-          {bg:C.primaryLight,color:C.primary,label:"Período da viagem"},
-        ].map(({bg,color,label})=>(
-          <div key={label} style={{display:"flex",alignItems:"center",gap:5}}>
-            <div style={{width:14,height:14,borderRadius:4,background:bg}}/>
-            <span style={{fontSize:10,color:C.textLight}}>{label}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ─── EVENTO FORM ──────────────────────────────────────────────────────────────
-const EMOJIS_EVENTO = ["📌","✈","🏨","🎡","🛍","🍔","🎢","🌊","🎭","🚗","⛵","🎠","🎪","🎟","🏖","🌴","🎆","🎇","🎑","🎈"];
-
-function EventoForm({ evento, onSalvar, onClose }) {
-  const empty = { titulo: "", data: "", hora: "", horaFim: "", local: "", notas: "", emoji: "📌" };
-  const [f, setF] = useState(evento?.id ? { ...evento } : { ...empty, ...(evento?.data ? { data: evento.data } : {}) });
-
-  function salvar() {
-    if (!f.titulo.trim()) return alert("Informe o título do evento");
-    if (!f.data) return alert("Informe a data");
-    onSalvar({ ...f, titulo: f.titulo.trim() });
-  }
-
-  return (
-    <Modal title={evento?.id ? "Editar evento" : "Novo evento"} onClose={onClose}>
-      {/* Emoji picker */}
-      <label style={S.label}>Ícone</label>
-      <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:14}}>
-        {EMOJIS_EVENTO.map(e => (
-          <button key={e} onClick={() => setF(p => ({...p, emoji: e}))} style={{
-            width:36,height:36,borderRadius:8,border:`2px solid ${f.emoji===e?C.primary:C.border}`,
-            background:f.emoji===e?C.primaryLight:"transparent",fontSize:18,cursor:"pointer"
-          }}>{e}</button>
-        ))}
-      </div>
-
-      <label style={S.label}>Título *</label>
-      <input style={S.input} placeholder="Ex: Universal Studios, Almoço no CityWalk..." value={f.titulo} onChange={e => setF(p => ({...p, titulo: e.target.value}))}/>
-
-      <label style={S.label}>Data *</label>
-      <input style={S.input} type="date" value={f.data} onChange={e => setF(p => ({...p, data: e.target.value}))}/>
-
-      <div style={{display:"flex",gap:10}}>
-        <div style={{flex:1}}>
-          <label style={S.label}>Horário (opcional)</label>
-          <input style={S.input} type="time" value={f.hora} onChange={e => setF(p => ({...p, hora: e.target.value}))}/>
-        </div>
-        <div style={{flex:1}}>
-          <label style={S.label}>Até (opcional)</label>
-          <input style={S.input} type="time" value={f.horaFim} onChange={e => setF(p => ({...p, horaFim: e.target.value}))}/>
-        </div>
-      </div>
-
-      <label style={S.label}>Local (opcional)</label>
-      <input style={S.input} placeholder="Ex: Universal Orlando Resort" value={f.local} onChange={e => setF(p => ({...p, local: e.target.value}))}/>
-
-      <label style={S.label}>Notas (opcional)</label>
-      <input style={S.input} placeholder="Ex: Levar protetor solar, reserva confirmada..." value={f.notas} onChange={e => setF(p => ({...p, notas: e.target.value}))}/>
-
-      <button style={S.btnPrimary} onClick={salvar}>{evento?.id ? "Salvar alterações" : "Adicionar evento"}</button>
     </Modal>
   );
 }
@@ -2040,57 +2324,6 @@ function BcbRate() {
   );
 }
 
-// ─── CALC TAB ─────────────────────────────────────────────────────────────────
-function CalcTab({settings}) {
-  const [usd,setUsd]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState("");
-  const dolarAj=calcDolarAjustado(settings); const usdN=parseFloat(usd)||0;
-  const usdF=calcUsdFinal(usdN,settings); const brlP=usdF*dolarAj; const brlC=dc?usdF*parseFloat(dc):null;
-  return (
-    <div style={S.page}>
-      <div style={S.sectionLabel}>Conversor USD → BRL</div>
-      <div style={S.card}>
-        <label style={S.label}>Valor em USD</label>
-        <input style={S.input} type="number" placeholder="Ex: 199" value={usd} onChange={e=>setUsd(e.target.value)}/>
-        {usdN>0&&[{label:"USD c/ taxa",value:`${fmtUSD(usdF,2)}`,color:C.textMid},{label:"Dólar ajustado",value:`${fmtBRL(dolarAj,4)}`,color:C.textMid},{label:"Valor em BRL",value:`${fmtBRL(brlP,2)}`,color:C.primary}].map(({label,value,color})=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-            <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-            <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
-          </div>
-        ))}
-        <div style={{height:14}}/>
-        <label style={S.label}>Dólar que você pagou (opcional)</label>
-        <input style={S.input} type="number" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
-        {brlC&&usdN>0&&[{label:"Com seu dólar",value:`${fmtBRL(brlC,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brlP-brlC),2)}`,color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}>
-            <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-            <span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
-          </div>
-        ))}
-      </div>
-      <div style={S.sectionLabel}>Conversor de Peso</div>
-      <div style={S.card}>
-        <label style={S.label}>Libras (lbs)</label>
-        <input style={S.input} type="number" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
-        {lbs&&[[`Gramas`,`${(parseFloat(lbs)*453.592).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}g`],[`Kg`,`${(parseFloat(lbs)*453.592/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg`],["Oz",`${(parseFloat(lbs)*16).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})} oz`]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
-        <div style={{height:12}}/>
-        <label style={S.label}>Onças (oz)</label>
-        <input style={S.input} type="number" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
-        {oz&&[["Gramas",`${(parseFloat(oz)*28.3495).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}g`],["Kg",`${(parseFloat(oz)*28.3495/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg`],["Libras",`${(parseFloat(oz)/16).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})} lbs`]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
-      </div>
-      <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
-        {[["Dólar pago",`${fmtBRL(settings.dollarPago,4)}`],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",`${fmtBRL(dolarAj,4)}`]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
-        <BcbRate/>
-      </div>
-    </div>
-  );
-}
 
 // ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
 function SettingsModal({settings,onSave,onImport,onClose}) {
