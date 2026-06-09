@@ -124,17 +124,30 @@ function calcTotalGastosUSD(gastos) {
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
 async function fetchCotacao() {
-  // API PTAX BCB — endpoint JSON mais estável
-  // Tenta os últimos 5 dias úteis (cobre fins de semana e feriados)
-  for (let i = 0; i < 5; i++) {
+  // AwesomeAPI — cotação de mercado em tempo real (mesma fonte do Google Finance)
+  // Tenta bid (compra) que é o que o Google exibe
+  try {
+    const res = await fetch(
+      "https://economia.awesomeapi.com.br/last/USD-BRL",
+      { signal: AbortSignal.timeout(5000) }
+    );
+    const d = await res.json();
+    const bid = parseFloat(d?.USDBRL?.bid);
+    const pct = parseFloat(d?.USDBRL?.pctChange);
+    if (!isNaN(bid) && bid > 1) {
+      return { bid, pct: !isNaN(pct) ? pct : null, source: "Mercado" };
+    }
+  } catch {}
+  // Fallback: BCB PTAX (cotação oficial, atualiza 1x/dia)
+  for (let i = 0; i < 3; i++) {
     try {
       const d = new Date(Date.now() - i * 86400000);
       const mm = String(d.getMonth()+1).padStart(2,"0");
       const dd = String(d.getDate()).padStart(2,"0");
       const yyyy = d.getFullYear();
-      const dataFmt = `${mm}-${dd}-${yyyy}`; // formato MM-DD-YYYY do BCB
+      const dataFmt = `${mm}-${dd}-${yyyy}`;
       const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@d)?@d=%27${dataFmt}%27&$top=1&$format=json&$select=cotacaoVenda`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(6000) });
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) continue;
       const data = await res.json();
       const bid = parseFloat(data?.value?.[0]?.cotacaoVenda);
@@ -747,7 +760,7 @@ function CotacaoBcbCard({settings}) {
               <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>
               {variacao!==null&&<span style={{fontSize:12,fontWeight:700,color:varPos?C.danger:C.success}}>{varPos?"▲":"▼"} {Math.abs(variacao).toFixed(2)}%</span>}
             </div>
-            <div style={{fontSize:11,color:C.textLight,marginTop:1}}>{source==="BCB"?"BCB PTAX · ":""}às {lastFetch}</div>
+            <div style={{fontSize:11,color:C.textLight,marginTop:1}}>{source==="BCB"?"BCB PTAX · ":source==="Mercado"?"Tempo real · ":""}às {lastFetch}</div>
           </>)}
           {!loading&&!rate&&<div style={{fontSize:12,color:C.textLight}}>Toque para buscar</div>}
         </div>
