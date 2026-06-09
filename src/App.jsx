@@ -1478,10 +1478,18 @@ function SimuladorTab({settings, gastos, parcelas}) {
 function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
   const [showForm, setShowForm] = useState(false);
   const [f, setF] = useState({data:"",quantidade:"",cotacao:"",obs:""});
+  const [cotacaoBCB, setCotacaoBCB] = useState(null);
   const totalUSD = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0),0);
   const totalBRL = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0)*(parseFloat(c.cotacao)||0),0);
   const custoMedio = totalUSD>0 ? totalBRL/totalUSD : 0;
-  const cotacaoAtual = calcDolarAjustado(settings); // mercado + IOF + spread
+  // custo médio já inclui IOF+spread — comparar com mercado puro (BCB sem taxas)
+  const mercadoBase = cotacaoBCB || settings.dollarPago;
+  // Custo médio - (mercado + IOF + spread): taxas somadas ao valor de mercado
+  const cotacaoComTaxas = mercadoBase + mercadoBase * (settings.iof + settings.spread) / 100;
+
+  useEffect(()=>{
+    fetchCotacao().then(r=>{ if(r?.bid) setCotacaoBCB(r.bid); });
+  },[]);
 
   function salvar(){
     if(!f.quantidade||!f.cotacao||!f.data) return alert("Preencha data, quantidade e cotação");
@@ -1503,9 +1511,10 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
             <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>Total investido</div>
             <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{fmtBRL(totalBRL)}</div>
           </div>
-          <div style={{background:custoMedio>cotacaoAtual?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
-            <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>{custoMedio>cotacaoAtual?"Acima":"Abaixo"} mercado+taxas</div>
-            <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{custoMedio>0?`${custoMedio>cotacaoAtual?"+":"-"}${fmtBRL(Math.abs(custoMedio-cotacaoAtual),4)}`:"—"}</div>
+          <div style={{background:custoMedio>cotacaoComTaxas?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
+            <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>{custoMedio>cotacaoComTaxas?"Acima":"Abaixo"} mercado+taxas</div>
+            <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{custoMedio>0?`${custoMedio>cotacaoComTaxas?"+":"-"}${fmtBRL(Math.abs(custoMedio-cotacaoComTaxas),4)}`:"—"}</div>
+            {cotacaoBCB&&<div style={{fontSize:9,color:"rgba(255,255,255,0.6)",marginTop:2}}>mercado BCB: {fmtBRL(cotacaoBCB,4)}</div>}
           </div>
         </div>
       </div>
