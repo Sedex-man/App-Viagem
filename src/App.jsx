@@ -124,8 +124,17 @@ function calcTotalGastosUSD(gastos) {
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
 async function fetchCotacao() {
-  // AwesomeAPI — cotação de mercado em tempo real (mesma fonte do Google Finance)
-  // Tenta bid (compra) que é o que o Google exibe
+  // BCB endpoint de boletim intraday — atualiza várias vezes ao dia, próximo do Google
+  try {
+    const res = await fetch(
+      "https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/UltimasCotacoesDolar(moeda=@moeda,dataInicialStr=@dataInicialStr,dataFinalStr=@dataFinalStr)?@moeda=%27USD%27&@dataInicialStr=%2701-01-2000%27&@dataFinalStr=%2701-01-2099%27&$top=1&$orderby=dataHoraCotacao%20desc&$format=json&$select=cotacaoCompra,cotacaoVenda,dataHoraCotacao",
+      { signal: AbortSignal.timeout(5000) }
+    );
+    const d = await res.json();
+    const bid = parseFloat(d?.value?.[0]?.cotacaoCompra);
+    if (!isNaN(bid) && bid > 1) return { bid, pct: null, source: "BCB" };
+  } catch {}
+  // Fallback: AwesomeAPI
   try {
     const res = await fetch(
       "https://economia.awesomeapi.com.br/last/USD-BRL",
@@ -134,26 +143,8 @@ async function fetchCotacao() {
     const d = await res.json();
     const bid = parseFloat(d?.USDBRL?.bid);
     const pct = parseFloat(d?.USDBRL?.pctChange);
-    if (!isNaN(bid) && bid > 1) {
-      return { bid, pct: !isNaN(pct) ? pct : null, source: "Mercado" };
-    }
+    if (!isNaN(bid) && bid > 1) return { bid, pct: !isNaN(pct) ? pct : null, source: "Mercado" };
   } catch {}
-  // Fallback: BCB PTAX (cotação oficial, atualiza 1x/dia)
-  for (let i = 0; i < 3; i++) {
-    try {
-      const d = new Date(Date.now() - i * 86400000);
-      const mm = String(d.getMonth()+1).padStart(2,"0");
-      const dd = String(d.getDate()).padStart(2,"0");
-      const yyyy = d.getFullYear();
-      const dataFmt = `${mm}-${dd}-${yyyy}`;
-      const url = `https://olinda.bcb.gov.br/olinda/servico/PTAX/versao/v1/odata/CotacaoDolarDia(dataCotacao=@d)?@d=%27${dataFmt}%27&$top=1&$format=json&$select=cotacaoVenda`;
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const bid = parseFloat(data?.value?.[0]?.cotacaoVenda);
-      if (!isNaN(bid) && bid > 1) return { bid, pct: null, source: "BCB" };
-    } catch {}
-  }
   return null;
 }
 
