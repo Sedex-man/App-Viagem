@@ -81,23 +81,18 @@ const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
 // BRL total do produto (qtd × usd × taxaLocal × câmbio)
 const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * calcDolarAjustado(s);
 const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
-// Quantidade planejada (usa quantidade cadastrada)
-const prodQtd = p => {
-  const qtdParsed = parseInt(p.quantidade);
-  return isNaN(qtdParsed) || qtdParsed <= 0 ? 1 : qtdParsed;
-};
-
-// Quantidade comprada (usada para gastos reais)
-const prodQtdComprada = p => {
-  const qtdParsed = parseInt(p.qtdComprada);
-  return isNaN(qtdParsed) || qtdParsed <= 0 ? 1 : qtdParsed;
-};
-
-// USD total planejado
-const prodUSD = p => (parseFloat(p.usd) || 0) * prodQtd(p);
-
-// Peso total planejado
-const prodPeso = p => pesoGramas(p) * prodQtd(p);
+// Quantidade comprada: lê qtdComprada se comprado, senão 0 (para cálculos de gastos)
+const prodQtd = p => p.status === "comprado" ? Math.max(1, parseInt(p.qtdComprada) || 1) : 0;
+// Quantidade cadastrada no produto (para exibição e peso estimado)
+const prodQtdCad = p => Math.max(1, parseInt(p.quantidade) || 1);
+// USD total considerando quantidade comprada
+const prodUSD = p => (parseFloat(p.usd) || 0) * Math.max(1, parseInt(p.qtdComprada) || (p.status === "comprado" ? 1 : 0));
+// Peso total considerando quantidade cadastrada
+const prodPeso = p => pesoGramas(p) * prodQtdCad(p);
+// USD planeado (usa quantidade cadastrada, independente do status)
+const prodUSDPlanejado = p => (parseFloat(p.usd) || 0) * prodQtdCad(p);
+// BRL planeado (usa quantidade cadastrada, independente do status)
+const calcBRLProdutoPlanejado = (p, s) => usdComTaxa(p) * prodQtdCad(p) * calcDolarAjustado(s);
 
 // ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
 // Formata número com vírgula como separador decimal (padrão pt-BR)
@@ -557,47 +552,20 @@ DOLLAR TREE:
   function toggleStatus(id) {
     setProdutos(ps => ps.map(p => {
       if (p.id !== id) return p;
-
       const newStatus = p.status === "comprado" ? "pendente" : "comprado";
-      const taxaDefinida = p.localTaxa || 'isento';
-      const qtdCompradaAtual =
-        newStatus === "comprado"
-          ? (parseInt(p.qtdComprada) || 1)
-          : 0;
-
+      const novaQtd = newStatus === "comprado" ? 1 : 0;
       if (newStatus === "comprado") {
         setGastos(gs => {
           if (gs.some(g => g.produtoId === id)) return gs;
-
           return [...gs, {
-            id: `prod_${id}`,
-            produtoId: id,
-            descricao: p.nome,
-            loja: p.loja || "Não especificada",
+            id: `prod_${id}`, produtoId: id, descricao: p.nome, loja: p.loja || "Não especificada",
             usd: parseFloat(p.usd) || 0,
+            qtdComprada: novaQtd,
+            localTaxa: "isento",
             dolarPago: p.dollarPago || settings.dollarPago,
-            brl: null,
-            imagem: p.imagem || "",
-            categoria: "🛍 Compras",
-            divisao: [],
-            data: new Date().toLocaleDateString("pt-BR"),
-            tipo: "produto",
-            localTaxa: taxaDefinida,
-            qtdComprada: qtdCompradaAtual
+            brl: null, imagem: p.imagem || "",
+            categoria: p.categoria || "🛍 Compras", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
           }];
-        });
-      } else {
-        setGastos(gs => gs.filter(g => g.produtoId !== id));
-      }
-
-      return {
-        ...p,
-        status: newStatus,
-        qtdComprada: qtdCompradaAtual,
-        localTaxa: taxaDefinida
-      };
-    }));
-  }];
         });
       } else {
         setGastos(gs => gs.filter(g => g.produtoId !== id));
@@ -620,7 +588,6 @@ DOLLAR TREE:
   }
 
   function saveProd(prod) {
-    prod.quantidade = parseInt(prod.quantidade) || 1;
     delete imageCache[String(prod.id)];
     if(prod._legais){ prod.id?setItensLegais(ps=>ps.map(p=>p.id===prod.id?prod:p)):setItensLegais(ps=>[...ps,{...prod,id:Date.now()}]); }
     else { prod.id?setProdutos(ps=>ps.map(p=>p.id===prod.id?prod:p)):setProdutos(ps=>[...ps,{...prod,id:Date.now()}]); }
@@ -679,8 +646,8 @@ DOLLAR TREE:
   const stats = useMemo(()=>{
     const comprados=produtos.filter(p=>p.status==="comprado");
     const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
-    const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSD(p),0);
-    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProduto(p,settings),0);
+    const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSDPlanejado(p),0);
+    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProdutoPlanejado(p,settings),0);
     const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
     let totalMeusGastosUSD=0;
     gastos.forEach(g=>{
