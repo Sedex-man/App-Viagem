@@ -17,6 +17,7 @@ const normalizeCloudState = data => ({
   itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
   gastos: Array.isArray(data?.gastos) ? data.gastos : [],
   parcelas: Array.isArray(data?.parcelas) ? data.parcelas : [],
+  anotacoes: typeof data?.anotacoes === "string" ? data.anotacoes : "",
   planejamento: data?.planejamento || { dataInicio:"", dataFim:"", eventos:[] },
   checklist: Array.isArray(data?.checklist) ? data.checklist : [],
   comprasDolar: Array.isArray(data?.comprasDolar) ? data.comprasDolar : [],
@@ -456,6 +457,7 @@ export default function App() {
       setPlanejamento(cloudState.planejamento || { dataInicio:"", dataFim:"", eventos:[] });
       setChecklist(cloudState.checklist || []);
       setComprasDolar(cloudState.comprasDolar || []);
+      setAnotacoes(cloudState.anotacoes || 'WALMART:\n\nMais afastado: 3101 W Princeton St, Orlando, FL 32808, EUA\n\nCom itens da Disney: 8990 Turkey Lake Rd, Orlando FL 32819, EUA\n\nTARGET:\n\n4750 Millenia Plaza Way, Orlando, FL 32839, EUA\n\nTJ MAXX:\n\n5748 Hamlin Groves Trail, Winter Garden, FL 34787, EUA\n\nDOLLAR TREE:\n\n13605 S Apopka Vineland Rd Ste 103A, Orlando, FL 32821');
       setCloudReady(true);
     }, (error) => {
       console.error("Erro ao sincronizar com Firestore:", error);
@@ -475,7 +477,7 @@ export default function App() {
     }
 
     const timer = setTimeout(() => {
-      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar })
+      saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
         .catch((error) => {
           console.error("Erro ao salvar no Firestore:", error);
           notify("Erro ao salvar na nuvem", "error");
