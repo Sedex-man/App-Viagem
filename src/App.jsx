@@ -385,6 +385,7 @@ export default function App() {
   const [planejamento, setPlanejamento] = useState({ dataInicio:"", dataFim:"", eventos:[] });
   const [checklist, setChecklist] = useState([]);
   const [comprasDolar, setComprasDolar] = useState([]);
+  const [anotacoes, setAnotacoes] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showGastoForm, setShowGastoForm] = useState(false);
