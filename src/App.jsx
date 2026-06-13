@@ -544,21 +544,24 @@ DOLLAR TREE:
     setProdutos(ps => ps.map(p => {
       if (p.id !== id) return p;
       const newStatus = p.status === "comprado" ? "pendente" : "comprado";
-      const novaQtd = newStatus === "comprado" ? (parseInt(p.qtdComprada) || 1) : 0;
+      const novaQtd = newStatus === "comprado" ? 1 : 0;
       if (newStatus === "comprado") {
-        setGastos(gs => gs.some(g=>g.produtoId===id) ? gs : [...gs, {
-          id: `prod_${id}`, produtoId:id, descricao:p.nome, loja:p.loja,
-          usd: parseFloat(p.usd) || 0,
-          qtdComprada: novaQtd,
-          localTaxa: p.localTaxa || "isento",
-          dolarPago: p.dollarPago || settings.dollarPago,
-          brl: null, imagem: p.imagem || "",
-          categoria: "🛍 Compras", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
-        }]);
+        setGastos(gs => {
+          if (gs.some(g => g.produtoId === id)) return gs;
+          return [...gs, {
+            id: `prod_${id}`, produtoId: id, descricao: p.nome, loja: p.loja || "Não especificada",
+            usd: parseFloat(p.usd) || 0,
+            qtdComprada: novaQtd,
+            localTaxa: "isento",
+            dolarPago: p.dollarPago || settings.dollarPago,
+            brl: null, imagem: p.imagem || "",
+            categoria: p.categoria || "🛍 Compras", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
+          }];
+        });
       } else {
         setGastos(gs => gs.filter(g => g.produtoId !== id));
       }
-      return {...p, status: newStatus, qtdComprada: novaQtd};
+      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: p.localTaxa || "isento"};
     }));
   }
 
