@@ -406,6 +406,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
   const skipNextCloudSave = useRef(false);
+  const skipNextSnapshot = useRef(false);
   const userDocRef = useMemo(() => user ? doc(db, "usuarios_pwa", user.uid) : null, [user]);
 
   // Verifica login/logout pelo Firebase Authentication.
@@ -448,6 +449,12 @@ export default function App() {
       }
 
       const cloudState = normalizeCloudState(snap.data());
+      // Se foi o próprio app que salvou, não sobrescrever o state local
+      if (skipNextSnapshot.current) {
+        skipNextSnapshot.current = false;
+        setCloudReady(true);
+        return;
+      }
       skipNextCloudSave.current = true;
       setSettings(cloudState.settings);
       setProdutos(cloudState.produtos);
@@ -477,10 +484,12 @@ export default function App() {
     }
 
     const timer = setTimeout(() => {
+      skipNextSnapshot.current = true;
       saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
         .catch((error) => {
           console.error("Erro ao salvar no Firestore:", error);
           notify("Erro ao salvar na nuvem", "error");
+          skipNextSnapshot.current = false;
         });
     }, 350);
 
