@@ -2262,7 +2262,8 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
 
 function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,onUpdate}) {
   const [expanded,setExpanded]=useState(false);
-  const qtdC=p.status==="comprado"?(parseInt(p.qtdComprada)||1):0;
+  const isComprado=p.status==="comprado";
+  const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
   const brl=usdUnit*calcDolarAjustado(settings);
@@ -2295,8 +2296,8 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
         </div>
       </div>
 
-      {/* Controles SEMPRE visíveis: taxa + quantidade */}
-      <div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
+      {/* Controles visíveis apenas quando comprado */}
+      {isComprado&&<div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.success}44`}}>
         {/* Seletor de taxa */}
         <div style={{marginBottom:8}}>
           <div style={{fontSize:10,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:6}}>💰 Taxa local</div>
@@ -2311,13 +2312,13 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
           <span style={{fontSize:12,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <button onClick={e=>{e.stopPropagation();const atual=p.status==="comprado"?(parseInt(p.qtdComprada)||1):0;const n=Math.max(0,atual-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-            <span style={{fontSize:16,fontWeight:800,color:qtdC>0?C.success:C.textLight,minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{qtdC}</span>
-            <button onClick={e=>{e.stopPropagation();const atual=p.status==="comprado"?(parseInt(p.qtdComprada)||1):0;const n=atual+1;onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+            <button onClick={e=>{e.stopPropagation();const n=Math.max(0,qtdC-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <span style={{fontSize:16,fontWeight:800,color:C.success,minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{qtdC}</span>
+            <button onClick={e=>{e.stopPropagation();const n=qtdC+1;onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
           </div>
           {qtdC>0&&usdTotal>0&&<span style={{fontSize:11,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdTotal,2)} total</span>}
         </div>
-      </div>
+      </div>}
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
           {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtd>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD total (×${qtd})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
