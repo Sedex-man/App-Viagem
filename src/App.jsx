@@ -97,9 +97,14 @@ const fmtBRL = (v, dec=2) => `R$ ${Number(v).toLocaleString("pt-BR",{minimumFrac
 const fmtN   = (v, dec=2) => Number(v).toLocaleString("pt-BR",{minimumFractionDigits:dec,maximumFractionDigits:dec});
 
 // tudo em USD — dolarPago = cotação usada na compra
-function calcMinhaParteUSD(gasto) {
+function calcMinhaParteUSD(gasto, produtosArr) {
   // Para gastos de produto: usd é unitário, multiplicar por qtd e taxa local
-  const usdUnit = parseFloat(gasto.usd) || 0;
+  // Se usd=0 (gasto antigo), tentar recuperar do array de produtos
+  let usdUnit = parseFloat(gasto.usd) || 0;
+  if (usdUnit === 0 && gasto.produtoId && produtosArr) {
+    const pai = produtosArr.find(p => p.id === gasto.produtoId);
+    usdUnit = parseFloat(pai?.usd) || 0;
+  }
   const qtd = parseInt(gasto.qtdComprada) || 1;
   const taxa = gasto.localTaxa === "orlando" ? 0.065 : gasto.localTaxa === "kissimmee" ? 0.075 : 0;
   const totalUSD = gasto.tipo === "produto" ? usdUnit * (1 + taxa) * qtd : usdUnit;
@@ -113,8 +118,8 @@ function usdToBRL(usd, gasto, settings) {
   const cotacao = parseFloat(gasto.dolarPago) || calcDolarAjustado(settings);
   return usd * cotacao;
 }
-function calcTotalGastosUSD(gastos) {
-  return gastos.reduce((a, g) => a + calcMinhaParteUSD(g), 0);
+function calcTotalGastosUSD(gastos, produtosArr) {
+  return gastos.reduce((a, g) => a + calcMinhaParteUSD(g, produtosArr), 0);
 }
 
 // ─── AWESOMEAPI COTAÇÃO ──────────────────────────────────────────────────────
@@ -642,7 +647,9 @@ DOLLAR TREE:
     const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
     let totalMeusGastosUSD=0;
     gastos.forEach(g=>{
-      const uUnit=parseFloat(g.usd)||0;
+      // Fallback para produto pai se usd=0 (gastos legados criados com bug)
+      const pai=g.produtoId?produtos.find(p=>p.id===g.produtoId):null;
+      const uUnit=(parseFloat(g.usd)||0)||(parseFloat(pai?.usd)||0);
       const qtd=g.tipo==="produto"?(parseInt(g.qtdComprada)||1):1;
       const taxa=g.localTaxa==="orlando"?0.065:g.localTaxa==="kissimmee"?0.075:0;
       if(g.divisao&&g.divisao.length>0){
@@ -929,7 +936,7 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
   const [filtro,setFiltro]=useState("todos");
   const [subTab,setSubTab]=useState("gastos");
 
-  const totalUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g),0);
+  const totalUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g,produtos),0);
   const aReceberUSD=gastos.reduce((a,g)=>{
     if(!g.divisao||g.divisao.length===0) return a;
     return a+g.divisao.filter(p=>!p.pago).reduce((s,p)=>s+(parseFloat(p.valor)||0),0);
@@ -985,11 +992,13 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
 
 function GastoCard({g,settings,onEdit,onDelete,onTogglePago,produtos}) {
   const [expanded,setExpanded]=useState(false);
-  const usdUnit=parseFloat(g.usd)||0;
+  // Se usd=0 e for produto, buscar preço do produto pai (gastos antigos podem ter usd:0)
+  const prodPai = g.produtoId ? produtos?.find(p=>p.id===g.produtoId) : null;
+  const usdUnit=parseFloat(g.usd)||parseFloat(prodPai?.usd)||0;
   const qtdG=parseInt(g.qtdComprada)||1;
   const taxaG=g.localTaxa==="orlando"?0.065:g.localTaxa==="kissimmee"?0.075:0;
   const totalUSD=g.tipo==="produto"?usdUnit*(1+taxaG)*qtdG:usdUnit;
-  const minhaUSD=calcMinhaParteUSD(g);
+  const minhaUSD=calcMinhaParteUSD(g,produtos);
   const minhaBRL=usdToBRL(minhaUSD,g,settings);
   const totalBRL=usdToBRL(totalUSD,g,settings);
   const cotUsada=parseFloat(g.dolarPago)||settings.dollarPago;
@@ -1529,7 +1538,7 @@ function ConversorTab({settings}) {
 
 // ─── SIMULADOR ───────────────────────────────────────────────────────────────
 function SimuladorTab({settings, gastos, parcelas}) {
-  const totalGastosUSD = calcTotalGastosUSD(gastos);
+  const totalGastosUSD = calcTotalGastosUSD(gastos, produtos||[]);
   const totalParcelasMensal = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte||p.valorParcela)||0)/parseInt(p.quantidadeParcelas||1),0);
   const totalParcelasBRL = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0),0);
   const parcelasRestBRL = parcelas.reduce((a,p)=>{
@@ -2436,7 +2445,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
       const cat=g.categoria||"💳 Outros";
       if(!map[cat])map[cat]={total:0,usd:0,minhaUSD:0,aReceber:0};
       const usd=parseFloat(g.usd)||0;
-      const minha=calcMinhaParteUSD(g);
+      const minha=calcMinhaParteUSD(g,produtos);
       const aRec=g.divisao?g.divisao.filter(p=>!p.pago).reduce((s,p)=>s+(parseFloat(p.valor)||0),0):0;
       map[cat].total++;
       map[cat].usd+=usd;
@@ -2463,7 +2472,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
   },[gastos]);
 
   const totalGastosUSD=gastos.reduce((a,g)=>a+(parseFloat(g.usd)||0),0);
-  const totalMeuUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g),0);
+  const totalMeuUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g,produtos),0);
   const totalAReceberUSD=gastos.reduce((a,g)=>{
     if(!g.divisao||g.divisao.length===0) return a;
     return a+g.divisao.filter(p=>!p.pago).reduce((s,p)=>s+(parseFloat(p.valor)||0),0);
@@ -2633,7 +2642,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
             {gastos.length===0&&<div style={{fontSize:13,color:C.textLight,textAlign:"center",padding:"16px 0"}}>Nenhum gasto ainda</div>}
             {gastos.map(g=>{
               const usd=parseFloat(g.usd)||0;
-              const minha=calcMinhaParteUSD(g);
+              const minha=calcMinhaParteUSD(g,produtos);
               const nP=1+(g.divisao?.length||0);
               return(
                 <div key={g.id} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1fr",gap:4,padding:"9px 0",borderTop:`1px solid ${C.borderLight}`,alignItems:"center"}}>
