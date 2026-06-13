@@ -81,12 +81,14 @@ const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
 // BRL total do produto (qtd × usd × taxaLocal × câmbio)
 const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * calcDolarAjustado(s);
 const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
-// Quantidade comprada (padrão 1)
-const prodQtd = p => Math.max(1, parseInt(p.quantidade) || 1);
-// USD total considerando quantidade
-const prodUSD = p => (parseFloat(p.usd) || 0) * prodQtd(p);
-// Peso total considerando quantidade
-const prodPeso = p => pesoGramas(p) * prodQtd(p);
+// Quantidade comprada: lê qtdComprada se comprado, senão 0 (para cálculos de gastos)
+const prodQtd = p => p.status === "comprado" ? Math.max(1, parseInt(p.qtdComprada) || 1) : 0;
+// Quantidade cadastrada no produto (para exibição e peso estimado)
+const prodQtdCad = p => Math.max(1, parseInt(p.quantidade) || 1);
+// USD total considerando quantidade comprada
+const prodUSD = p => (parseFloat(p.usd) || 0) * Math.max(1, parseInt(p.qtdComprada) || (p.status === "comprado" ? 1 : 0));
+// Peso total considerando quantidade cadastrada
+const prodPeso = p => pesoGramas(p) * prodQtdCad(p);
 
 // ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
 // Formata número com vírgula como separador decimal (padrão pt-BR)
@@ -96,7 +98,11 @@ const fmtN   = (v, dec=2) => Number(v).toLocaleString("pt-BR",{minimumFractionDi
 
 // tudo em USD — dolarPago = cotação usada na compra
 function calcMinhaParteUSD(gasto) {
-  const totalUSD = parseFloat(gasto.usd) || 0;
+  // Para gastos de produto: usd é unitário, multiplicar por qtd e taxa local
+  const usdUnit = parseFloat(gasto.usd) || 0;
+  const qtd = parseInt(gasto.qtdComprada) || 1;
+  const taxa = gasto.localTaxa === "orlando" ? 0.065 : gasto.localTaxa === "kissimmee" ? 0.075 : 0;
+  const totalUSD = gasto.tipo === "produto" ? usdUnit * (1 + taxa) * qtd : usdUnit;
   if (!gasto.divisao || gasto.divisao.length === 0) return totalUSD;
   const somaDivisao = gasto.divisao.reduce((acc, p) => acc + (parseFloat(p.valor) || 0), 0);
   return Math.max(0, totalUSD - somaDivisao);
@@ -538,19 +544,21 @@ DOLLAR TREE:
     setProdutos(ps => ps.map(p => {
       if (p.id !== id) return p;
       const newStatus = p.status === "comprado" ? "pendente" : "comprado";
-      // sync gastos: add or remove produto entry
+      const novaQtd = newStatus === "comprado" ? (parseInt(p.qtdComprada) || 1) : 0;
       if (newStatus === "comprado") {
-        const brl = calcBRL(p.usd, settings);
         setGastos(gs => gs.some(g=>g.produtoId===id) ? gs : [...gs, {
           id: `prod_${id}`, produtoId:id, descricao:p.nome, loja:p.loja,
-          usd:usdComTaxa(p)*prodQtd(p), dolarPago:p.dollarPago||settings.dollarPago,
-          brl: null, imagem:p.imagem||"",
-          categoria:"🛍 Compras", divisao:[], data: new Date().toLocaleDateString("pt-BR"), tipo:"produto"
+          usd: parseFloat(p.usd) || 0,
+          qtdComprada: novaQtd,
+          localTaxa: p.localTaxa || "isento",
+          dolarPago: p.dollarPago || settings.dollarPago,
+          brl: null, imagem: p.imagem || "",
+          categoria: "🛍 Compras", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
         }]);
       } else {
         setGastos(gs => gs.filter(g => g.produtoId !== id));
       }
-      return {...p, status: newStatus};
+      return {...p, status: newStatus, qtdComprada: novaQtd};
     }));
   }
 
@@ -575,43 +583,38 @@ DOLLAR TREE:
   }
 
   function updateProduto(id, campos) {
-    // Atualiza produtos
-    setProdutos(ps => ps.map(p => p.id === id ? {...p, ...campos} : p));
+    setProdutos(ps => {
+      const novosProdutos = ps.map(p => p.id === id ? {...p, ...campos} : p);
+      const prod = novosProdutos.find(p => p.id === id);
+      if (!prod) return novosProdutos;
 
-    // Sincroniza gastos em tempo real
-    if ('qtdComprada' in campos) {
-      const novaQtd = campos.qtdComprada;
-      if (novaQtd === 0) {
-        // Zerou: remove da aba de gastos
-        setGastos(gs => gs.filter(g => g.produtoId !== id));
-      } else {
-        // Atualiza qtd e recalcula usd no gasto
-        setProdutos(ps => {
-          const prod = ps.find(p => p.id === id);
-          if (!prod) return ps;
-          const novoUSD = usdComTaxa({...prod,...campos}) * novaQtd;
-          setGastos(gs => gs.map(g => g.produtoId === id
-            ? {...g, qtdComprada: novaQtd, usd: novoUSD}
-            : g
-          ));
-          return ps;
-        });
+      if ('qtdComprada' in campos) {
+        const novaQtd = campos.qtdComprada;
+        if (novaQtd === 0) {
+          setGastos(gs => gs.filter(g => g.produtoId !== id));
+        } else {
+          // Se não estava comprado, adicionar como gasto
+          setGastos(gs => {
+            if (!gs.some(g => g.produtoId === id)) {
+              return [...gs, {
+                id: `prod_${id}`, produtoId: id, descricao: prod.nome, loja: prod.loja,
+                usd: parseFloat(prod.usd) || 0,
+                qtdComprada: novaQtd,
+                localTaxa: prod.localTaxa || "isento",
+                dolarPago: prod.dollarPago || settings.dollarPago,
+                brl: null, imagem: prod.imagem || "",
+                categoria: "🛍 Compras", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
+              }];
+            }
+            return gs.map(g => g.produtoId === id ? {...g, qtdComprada: novaQtd} : g);
+          });
+        }
       }
-    }
-    if ('localTaxa' in campos) {
-      // Taxa mudou: recalcular usd no gasto correspondente
-      setProdutos(ps => {
-        const prod = ps.find(p => p.id === id);
-        if (!prod) return ps;
-        const prodAtualizado = {...prod, ...campos};
-        const novoUSD = usdComTaxa(prodAtualizado) * prodQtd(prodAtualizado);
-        setGastos(gs => gs.map(g => g.produtoId === id
-          ? {...g, localTaxa: campos.localTaxa, usd: novoUSD}
-          : g
-        ));
-        return ps;
-      });
-    }
+      if ('localTaxa' in campos) {
+        setGastos(gs => gs.map(g => g.produtoId === id ? {...g, localTaxa: campos.localTaxa} : g));
+      }
+      return novosProdutos;
+    });
   }
 
   function moveToList(item) {
@@ -968,7 +971,10 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
 
 function GastoCard({g,settings,onEdit,onDelete,onTogglePago,produtos}) {
   const [expanded,setExpanded]=useState(false);
-  const totalUSD=parseFloat(g.usd)||0;
+  const usdUnit=parseFloat(g.usd)||0;
+  const qtdG=parseInt(g.qtdComprada)||1;
+  const taxaG=g.localTaxa==="orlando"?0.065:g.localTaxa==="kissimmee"?0.075:0;
+  const totalUSD=g.tipo==="produto"?usdUnit*(1+taxaG)*qtdG:usdUnit;
   const minhaUSD=calcMinhaParteUSD(g);
   const minhaBRL=usdToBRL(minhaUSD,g,settings);
   const totalBRL=usdToBRL(totalUSD,g,settings);
@@ -2245,15 +2251,16 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
 
 function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,onUpdate}) {
   const [expanded,setExpanded]=useState(false);
-  const qtd=prodQtd(p);
-  const usdTotal=prodUSD(p);
-  const brl=calcBRL(usdTotal,settings);
-  const brlPago=p.dollarPago?calcBRLPago(usdTotal,settings,p.dollarPago):null;
+  const qtdC=parseInt(p.qtdComprada)||(p.status==="comprado"?1:0);
+  const usdUnit=parseFloat(p.usd)||0;
+  const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
+  const brl=usdUnit*calcDolarAjustado(settings);
+  const brlPago=p.dollarPago?calcBRLPago(usdUnit,settings,p.dollarPago):null;
   const peso=prodPeso(p);
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
   const pc=prioColors[p.prioridade]||prioColors["Média"];
   return (
-    <div style={{...S.card,marginBottom:10,opacity:p.status==="comprado"?0.75:1}}>
+    <div style={{...S.card,marginBottom:10,border:p.status==="comprado"?`1px solid ${C.success}44`:undefined}}>
       <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
         <div style={{width:50,height:50,borderRadius:12,overflow:"hidden",flexShrink:0,border:`1px solid ${C.border}`}}>
           <ProductImage produto={p} iconSize={22}/>
@@ -2263,9 +2270,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
           <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
             <div style={{fontWeight:600,fontSize:14,color:p.status==="comprado"?C.textLight:C.text,textDecoration:p.status==="comprado"?"line-through":"none",lineHeight:1.3,flex:1}}>{p.nome}</div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>
-                {qtd>1?<>{fmtUSD(p.usd,2)}<span style={{fontSize:10,color:C.textLight}}>×{qtd}</span><br/><span style={{color:C.text}}>{fmtUSD(usdTotal,2)}</span></>:fmtUSD(p.usd,2)}
-              </div>
+              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,0)}</div>
             </div>
           </div>
@@ -2273,9 +2278,33 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
             <span style={S.tag}>{p.loja}</span>
             {!isLegais&&<span style={{...S.tag,background:pc.bg,color:pc.color,borderColor:pc.color+"33"}}>{p.prioridade}</span>}
             <span style={S.tag}>{(peso/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg</span>
-            {(p.quantidade||1)>1&&<span style={{...S.tag,background:C.primaryLight,color:C.primary,borderColor:C.primary+"33"}}>×{p.quantidade}</span>}
-            {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ {(p.quantidade||1)>1?`${p.qtdComprada||p.quantidade}/${p.quantidade}`:"Comprado"}</span>}
+            {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ Comprado</span>}
+            {p.localTaxa&&p.localTaxa!=="isento"&&<span style={{...S.tag,background:C.purpleLight,color:C.purple,borderColor:C.purple+"33"}}>{p.localTaxa==="orlando"?"ORL 6,5%":"KIS 7,5%"}</span>}
           </div>
+        </div>
+      </div>
+
+      {/* Controles SEMPRE visíveis: taxa + quantidade */}
+      <div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
+        {/* Seletor de taxa */}
+        <div style={{marginBottom:8}}>
+          <div style={{fontSize:10,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:6}}>💰 Taxa local</div>
+          <div style={{display:"flex",gap:5}}>
+            {[{v:"isento",l:"Sem taxa",c:"#64748B"},{v:"orlando",l:"Orlando 6,5%",c:C.primary},{v:"kissimmee",l:"Kissimmee 7,5%",c:C.purple}].map(({v,l,c})=>{
+              const active=(p.localTaxa||"isento")===v;
+              return <button key={v} onClick={e=>{e.stopPropagation();onUpdate&&onUpdate(p.id,{localTaxa:v});}} style={{flex:1,padding:"5px 2px",borderRadius:7,border:`1.5px solid ${active?c:C.border}`,background:active?c:"transparent",color:active?"#fff":C.textLight,fontSize:9,fontWeight:700,cursor:"pointer"}}>{l}</button>;
+            })}
+          </div>
+        </div>
+        {/* Controle de quantidade */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
+          <span style={{fontSize:12,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button onClick={e=>{e.stopPropagation();const n=Math.max(0,qtdC-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <span style={{fontSize:16,fontWeight:800,color:qtdC>0?C.success:C.textLight,minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{qtdC}</span>
+            <button onClick={e=>{e.stopPropagation();const n=qtdC+1;onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+          </div>
+          {qtdC>0&&usdTotal>0&&<span style={{fontSize:11,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdTotal,2)} total</span>}
         </div>
       </div>
       {expanded&&(
