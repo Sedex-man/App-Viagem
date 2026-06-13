@@ -637,7 +637,18 @@ DOLLAR TREE:
     const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSD(p),0);
     const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProduto(p,settings),0);
     const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
-    const totalMeusGastosUSD=calcTotalGastosUSD(gastos);
+    let totalMeusGastosUSD=0;
+    gastos.forEach(g=>{
+      const uUnit=parseFloat(g.usd)||0;
+      const qtd=g.tipo==="produto"?(parseInt(g.qtdComprada)||1):1;
+      const taxa=g.localTaxa==="orlando"?0.065:g.localTaxa==="kissimmee"?0.075:0;
+      if(g.divisao&&g.divisao.length>0){
+        const soma=g.divisao.reduce((a,p)=>a+(parseFloat(p.valor)||0),0);
+        totalMeusGastosUSD+=Math.max(0,uUnit*(1+taxa)*qtd-soma);
+      } else {
+        totalMeusGastosUSD+=uUnit*(1+taxa)*qtd;
+      }
+    });
     return {total:produtos.length,comprados:comprados.length,pendentes:produtos.length-comprados.length,pesoTotal,valorTotalUSD,valorTotalBRL,valorGasto,lojas:new Set(produtos.map(p=>p.loja)).size,totalMeusGastosUSD};
   },[produtos,settings,gastos]);
 
@@ -2251,7 +2262,7 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
 
 function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,onUpdate}) {
   const [expanded,setExpanded]=useState(false);
-  const qtdC=parseInt(p.qtdComprada)||(p.status==="comprado"?1:0);
+  const qtdC=p.status==="comprado"?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
   const brl=usdUnit*calcDolarAjustado(settings);
@@ -2300,9 +2311,9 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
           <span style={{fontSize:12,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <button onClick={e=>{e.stopPropagation();const n=Math.max(0,qtdC-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+            <button onClick={e=>{e.stopPropagation();const atual=p.status==="comprado"?(parseInt(p.qtdComprada)||1):0;const n=Math.max(0,atual-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
             <span style={{fontSize:16,fontWeight:800,color:qtdC>0?C.success:C.textLight,minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{qtdC}</span>
-            <button onClick={e=>{e.stopPropagation();const n=qtdC+1;onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+            <button onClick={e=>{e.stopPropagation();const atual=p.status==="comprado"?(parseInt(p.qtdComprada)||1):0;const n=atual+1;onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
           </div>
           {qtdC>0&&usdTotal>0&&<span style={{fontSize:11,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdTotal,2)} total</span>}
         </div>
