@@ -74,6 +74,12 @@ const calcDolarAjustado = s => s.dollarPago * (1 + (s.iof + s.spread) / 100);
 const calcUsdFinal = (usd, s) => usd * (1 + s.taxa / 100);
 const calcBRL = (usd, s) => calcUsdFinal(usd, s) * calcDolarAjustado(s);
 const calcBRLPago = (usd, s, dp) => calcUsdFinal(usd, s) * dp;
+// Taxa de imposto local (Orlando 6.5%, Kissimmee 7.5%, isento 0%)
+const taxaLocal = p => p.localTaxa === 'orlando' ? 0.065 : p.localTaxa === 'kissimmee' ? 0.075 : 0;
+// USD com imposto local aplicado
+const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
+// BRL total do produto (qtd × usd × taxaLocal × câmbio)
+const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * calcDolarAjustado(s);
 const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
 // Quantidade comprada (padrão 1)
 const prodQtd = p => Math.max(1, parseInt(p.quantidade) || 1);
@@ -537,7 +543,7 @@ DOLLAR TREE:
         const brl = calcBRL(p.usd, settings);
         setGastos(gs => gs.some(g=>g.produtoId===id) ? gs : [...gs, {
           id: `prod_${id}`, produtoId:id, descricao:p.nome, loja:p.loja,
-          usd:prodUSD(p), dolarPago:p.dollarPago||settings.dollarPago,
+          usd:usdComTaxa(p)*prodQtd(p), dolarPago:p.dollarPago||settings.dollarPago,
           brl: null, imagem:p.imagem||"",
           categoria:"🛍 Compras", divisao:[], data: new Date().toLocaleDateString("pt-BR"), tipo:"produto"
         }]);
@@ -566,6 +572,10 @@ DOLLAR TREE:
     if(prod._legais){ prod.id?setItensLegais(ps=>ps.map(p=>p.id===prod.id?prod:p)):setItensLegais(ps=>[...ps,{...prod,id:Date.now()}]); }
     else { prod.id?setProdutos(ps=>ps.map(p=>p.id===prod.id?prod:p)):setProdutos(ps=>[...ps,{...prod,id:Date.now()}]); }
     notify(prod.id?"Atualizado!":"Adicionado!"); setShowForm(false); setEditProd(null);
+  }
+
+  function updateProduto(id, campos) {
+    setProdutos(ps => ps.map(p => p.id === id ? {...p, ...campos} : p));
   }
 
   function moveToList(item) {
@@ -631,7 +641,7 @@ DOLLAR TREE:
 
       <div style={S.content}>
         {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} anotacoes={anotacoes} setAnotacoes={setAnotacoes}/>}
-        {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab}/>}
+        {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab} onUpdate={updateProduto}/>}
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
@@ -2161,7 +2171,7 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
 }
 
 // ─── PRODUTOS TAB ─────────────────────────────────────────────────────────────
-function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onAdd,onMoveToList,onSubTabChange}) {
+function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onAdd,onMoveToList,onSubTabChange,onUpdate}) {
   const [subTab,setSubTab]=useState("compras");
   function changeSubTab(v){setSubTab(v);onSubTabChange&&onSubTabChange(v);}
   const [filterLoja,setFilterLoja]=useState("Todas");
@@ -2191,13 +2201,13 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
         </div>
       )}
       <div style={{fontSize:12,color:C.textLight,marginBottom:10,fontWeight:500}}>{filtered.length} item(s)</div>
-      {filtered.map(p=><ProdutoCard key={p.id} p={p} settings={settings} onToggle={subTab==="compras"?()=>onToggle(p.id):null} onDelete={()=>onDelete(p.id,subTab==="legais"?"legais":"produtos")} onEdit={()=>onEdit({...p,_legais:subTab==="legais"})} onMoveToList={subTab==="legais"?()=>onMoveToList(p):null} isLegais={subTab==="legais"}/>)}
+      {filtered.map(p=><ProdutoCard key={p.id} p={p} settings={settings} onToggle={subTab==="compras"?()=>onToggle(p.id):null} onDelete={()=>onDelete(p.id,subTab==="legais"?"legais":"produtos")} onEdit={()=>onEdit({...p,_legais:subTab==="legais"})} onMoveToList={subTab==="legais"?()=>onMoveToList(p):null} isLegais={subTab==="legais"} onUpdate={onUpdate}/>)}
       {filtered.length===0&&lista.length>0&&<Empty text="Nenhum item encontrado"/>}
     </div>
   );
 }
 
-function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}) {
+function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,onUpdate}) {
   const [expanded,setExpanded]=useState(false);
   const qtd=prodQtd(p);
   const usdTotal=prodUSD(p);
@@ -2250,6 +2260,28 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
               </div>
             </div>
           )}
+          {/* Seletor de taxa local */}
+          {!isLegais&&<div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.textLight,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💰 Taxa local</div>
+            <div style={{display:"flex",gap:6}}>
+              {[{v:"isento",l:"Sem taxa",bg:C.borderLight,col:C.textMid,act:C.textMid,actBg:C.bg},{v:"orlando",l:"Orlando 6,5%",bg:C.primaryLight,col:C.primary,act:C.primary,actBg:C.primaryLight},{v:"kissimmee",l:"Kissimmee 7,5%",bg:C.purpleLight,col:C.purple,act:C.purple,actBg:C.purpleLight}].map(({v,l,actBg,act,bg,col})=>{
+                const active=(p.localTaxa||"isento")===v;
+                return <button key={v} onClick={e=>{e.stopPropagation();onUpdate&&onUpdate(p.id,{localTaxa:v});}} style={{flex:1,padding:"6px 4px",borderRadius:8,border:`1.5px solid ${active?act:C.border}`,background:active?actBg:C.bgCard,color:active?act:C.textLight,fontSize:10,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>{l}</button>;
+              })}
+            </div>
+            {(p.localTaxa==="orlando"||p.localTaxa==="kissimmee")&&<div style={{fontSize:11,color:C.textMid,marginTop:6,fontFamily:"'DM Mono',monospace"}}>
+              US$ {fmtN(usdComTaxa(p),2)} c/ imposto · {fmtBRL(usdComTaxa(p)*prodQtd(p)*calcDolarAjustado(settings))} total
+            </div>}
+          </div>}
+          {/* Controle de quantidade comprada */}
+          {!isLegais&&(p.quantidade||1)>1&&<div style={{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <button onClick={e=>{e.stopPropagation();const n=Math.max(0,(p.qtdComprada||0)-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <span style={{fontSize:16,fontWeight:800,color:(p.qtdComprada||0)>0?C.success:C.textLight,minWidth:50,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||0}/{p.quantidade}</span>
+              <button onClick={e=>{e.stopPropagation();const n=Math.min(p.quantidade||1,(p.qtdComprada||0)+1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+            </div>
+          </div>}
           {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{display:"block",fontSize:13,color:C.primary,marginTop:8}}>🔗 Ver produto</a>}
           <div style={{display:"flex",gap:8,marginTop:10}}>
             <button style={S.btnOutline} onClick={onEdit}>✏ Editar</button>
@@ -2309,8 +2341,8 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
       if(!map[p.loja])map[p.loja]={total:0,comprados:0,usd:0,brl:0,peso:0};
       map[p.loja].total++;
       if(p.status==="comprado")map[p.loja].comprados++;
-      map[p.loja].usd+=p.usd;
-      map[p.loja].brl+=calcBRL(p.usd,settings);
+      map[p.loja].usd+=prodUSD(p);
+      map[p.loja].brl+=calcBRLProduto(p,settings);
       map[p.loja].peso+=prodPeso(p);
     });
     return Object.entries(map).sort((a,b)=>b[1].usd-a[1].usd);
