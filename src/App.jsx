@@ -476,7 +476,7 @@ export default function App() {
     }, 350);
 
     return () => clearTimeout(timer);
-  }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, cloudReady, userDocRef]);
+  }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes, cloudReady, userDocRef]);
 
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
 
@@ -710,7 +710,8 @@ function CotacaoBcbCard({settings}) {
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
-function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange}) {
+function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,anotacoes,setAnotacoes}) {
+  const [showNotas,setShowNotas]=useState(false);
   const dolarAj=calcDolarAjustado(settings);
   const pct=stats.total?Math.round(stats.comprados/stats.total*100):0;
   const usdRestante=settings.totalDolarViagem - stats.valorTotalUSD;
@@ -730,6 +731,30 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange})
 
       {/* Cotação BCB */}
       <CotacaoBcbCard settings={settings}/>
+
+      {/* Anotações */}
+      <div style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
+        <button onClick={()=>setShowNotas(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <span style={{fontSize:18}}>📝</span>
+            <span style={{fontSize:14,fontWeight:700,color:C.text}}>Anotações</span>
+            {anotacoes&&<span style={{fontSize:11,background:C.primaryLight,color:C.primary,borderRadius:999,padding:"1px 8px",fontWeight:600}}>{anotacoes.split('
+').filter(Boolean).length} linha(s)</span>}
+          </div>
+          <span style={{fontSize:12,color:C.textLight,fontWeight:600}}>{showNotas?"▲ Fechar":"▼ Abrir"}</span>
+        </button>
+        {showNotas&&(
+          <div style={{borderTop:`1px solid ${C.border}`,padding:"12px 14px"}}>
+            <textarea
+              value={anotacoes}
+              onChange={e=>setAnotacoes(e.target.value)}
+              placeholder="Anote aqui o que quiser — lista de compras, lembretes, observações..."
+              style={{width:"100%",minHeight:160,background:C.bg,border:`1px solid ${C.border}`,borderRadius:9,padding:"10px 12px",color:C.text,fontSize:14,fontFamily:"'Inter',sans-serif",resize:"vertical",outline:"none",boxSizing:"border-box",lineHeight:1.6}}
+            />
+            <div style={{fontSize:11,color:C.textLight,marginTop:4,textAlign:"right"}}>Salvo automaticamente</div>
+          </div>
+        )}
+      </div>
 
       {/* Dólar levando */}
       <div style={{...S.card,background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:`1px solid ${C.success}33`}}>
@@ -2170,7 +2195,8 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
             <span style={S.tag}>{p.loja}</span>
             {!isLegais&&<span style={{...S.tag,background:pc.bg,color:pc.color,borderColor:pc.color+"33"}}>{p.prioridade}</span>}
             <span style={S.tag}>{(peso/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg</span>
-            {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ Comprado</span>}
+            {(p.quantidade||1)>1&&<span style={{...S.tag,background:C.primaryLight,color:C.primary,borderColor:C.primary+"33"}}>×{p.quantidade}</span>}
+            {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ {(p.quantidade||1)>1?`${p.qtdComprada||p.quantidade}/${p.quantidade}`:"Comprado"}</span>}
           </div>
         </div>
       </div>
@@ -2182,6 +2208,16 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
             </div>
           ))}
+          {(p.quantidade||1)>1&&p.status==="comprado"&&(
+            <div style={{marginTop:8,marginBottom:4}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6}}>Quantos foram comprados?</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.max(0,(p.qtdComprada||p.quantidade)-1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>−</button>
+                <span style={{fontSize:16,fontWeight:700,color:C.primary,minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||p.quantidade}/{p.quantidade}</span>
+                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.min(p.quantidade,(p.qtdComprada||p.quantidade)+1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>＋</button>
+              </div>
+            </div>
+          )}
           {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{display:"block",fontSize:13,color:C.primary,marginTop:8}}>🔗 Ver produto</a>}
           <div style={{display:"flex",gap:8,marginTop:10}}>
             <button style={S.btnOutline} onClick={onEdit}>✏ Editar</button>
@@ -2602,13 +2638,19 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
 // ─── PRODUTO FORM ─────────────────────────────────────────────────────────────
 function ProdutoForm({prod,onSave,onClose}) {
   const isL=prod?._legais===true;
-  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipo:"solido",volume:"",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",_legais:isL};
-  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),dollarPago:(prod.dollarPago||"").toString(),_legais:prod._legais||isL}:empty);
-  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,volume:parseFloat(f.volume)||0,dollarPago:f.dollarPago?parseFloat(f.dollarPago):null});}
+  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipo:"solido",volume:"",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",quantidade:1,_legais:isL};
+  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),dollarPago:(prod.dollarPago||"").toString(),quantidade:prod.quantidade||1,_legais:prod._legais||isL}:empty);
+  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,volume:parseFloat(f.volume)||0,dollarPago:f.dollarPago?parseFloat(f.dollarPago):null,quantidade:parseInt(f.quantidade)||1});}
   return (
     <Modal title={prod?.id?"Editar produto":isL?"✨ Item legal":"Novo produto"} onClose={onClose}>
       <label style={S.label}>Nome *</label>
       <input style={S.input} placeholder="Ex: AirPods Pro" value={f.nome} onChange={e=>setF(p=>({...p,nome:e.target.value}))}/>
+      <label style={S.label}>Quantidade</label>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
+        <button onClick={()=>setF(p=>({...p,quantidade:Math.max(1,(parseInt(p.quantidade)||1)-1)}))} style={{width:36,height:36,borderRadius:9,border:`1px solid ${C.border}`,background:C.bg,fontSize:18,cursor:"pointer",color:C.text,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>−</button>
+        <input style={{...S.input,marginBottom:0,textAlign:"center",fontWeight:700,fontSize:16}} type="number" min="1" value={f.quantidade||1} onChange={e=>setF(p=>({...p,quantidade:Math.max(1,parseInt(e.target.value)||1)}))}/>
+        <button onClick={()=>setF(p=>({...p,quantidade:(parseInt(p.quantidade)||1)+1}))} style={{width:36,height:36,borderRadius:9,border:`1px solid ${C.border}`,background:C.bg,fontSize:18,cursor:"pointer",color:C.text,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>＋</button>
+      </div>
       <label style={S.label}>Loja</label>
       <input style={S.input} list="lojas-list" placeholder="Digite ou escolha uma loja..." value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
       <datalist id="lojas-list">{LOJAS_SUGESTOES.map(l=><option key={l} value={l}/>)}</datalist>
