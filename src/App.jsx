@@ -74,6 +74,12 @@ const calcUsdFinal = (usd, s) => usd * (1 + s.taxa / 100);
 const calcBRL = (usd, s) => calcUsdFinal(usd, s) * calcDolarAjustado(s);
 const calcBRLPago = (usd, s, dp) => calcUsdFinal(usd, s) * dp;
 const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
+// Quantidade comprada (padrão 1)
+const prodQtd = p => Math.max(1, parseInt(p.quantidade) || 1);
+// USD total considerando quantidade
+const prodUSD = p => (parseFloat(p.usd) || 0) * prodQtd(p);
+// Peso total considerando quantidade
+const prodPeso = p => pesoGramas(p) * prodQtd(p);
 
 // ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
 // Formata número com vírgula como separador decimal (padrão pt-BR)
@@ -509,7 +515,7 @@ export default function App() {
         const brl = calcBRL(p.usd, settings);
         setGastos(gs => gs.some(g=>g.produtoId===id) ? gs : [...gs, {
           id: `prod_${id}`, produtoId:id, descricao:p.nome, loja:p.loja,
-          usd:p.usd, dolarPago:p.dollarPago||settings.dollarPago,
+          usd:prodUSD(p), dolarPago:p.dollarPago||settings.dollarPago,
           brl: null, imagem:p.imagem||"",
           categoria:"🛍 Compras", divisao:[], data: new Date().toLocaleDateString("pt-BR"), tipo:"produto"
         }]);
@@ -556,9 +562,9 @@ export default function App() {
 
   const stats = useMemo(()=>{
     const comprados=produtos.filter(p=>p.status==="comprado");
-    const pesoTotal=produtos.reduce((a,p)=>a+pesoGramas(p),0);
-    const valorTotalUSD=produtos.reduce((a,p)=>a+p.usd,0);
-    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRL(p.usd,settings),0);
+    const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
+    const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSD(p),0);
+    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRL(prodUSD(p),settings),0);
     const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
     const totalMeusGastosUSD=calcTotalGastosUSD(gastos);
     return {total:produtos.length,comprados:comprados.length,pendentes:produtos.length-comprados.length,pesoTotal,valorTotalUSD,valorTotalBRL,valorGasto,lojas:new Set(produtos.map(p=>p.loja)).size,totalMeusGastosUSD};
@@ -1593,7 +1599,7 @@ function BagagemTab({produtos, settings}) {
     {label:"💧 Líquidos",tipo:"liquido",cor:C.success},
     {label:"🛍 Outros",cor:C.warning},
   ];
-  const pesoTotal = produtos.filter(p=>p.status==="comprado").reduce((a,p)=>a+pesoGramas(p),0);
+  const pesoTotal = produtos.filter(p=>p.status==="comprado").reduce((a,p)=>a+prodPeso(p),0);
   const pct = Math.min(100,(pesoTotal/pesoMax)*100);
   const cor = pct<70?C.success:pct<90?C.warning:C.danger;
 
@@ -1603,7 +1609,7 @@ function BagagemTab({produtos, settings}) {
       cat.lojas ? cat.lojas.includes(p.loja) :
       true
     ));
-    const peso = itens.reduce((a,p)=>a+pesoGramas(p),0);
+    const peso = itens.reduce((a,p)=>a+prodPeso(p),0);
     return {...cat, peso, itens:itens.length};
   });
   // "Outros" = total - categorias específicas
@@ -1649,7 +1655,7 @@ function BagagemTab({produtos, settings}) {
         {[...produtos.filter(p=>p.status==="comprado")].sort((a,b)=>pesoGramas(b)-pesoGramas(a)).slice(0,5).map(p=>(
           <div key={p.id} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
             <span style={{fontSize:13,color:C.text,fontWeight:500}}>{p.nome}</span>
-            <span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtN(pesoGramas(p)/1000,3)} kg</span>
+            <span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtN(prodPeso(p)/1000,3)} kg</span>
           </div>
         ))}
         {produtos.filter(p=>p.status==="comprado").length===0&&<div style={{fontSize:13,color:C.textLight,textAlign:"center",padding:"12px 0"}}>Nenhum item comprado ainda</div>}
@@ -2171,9 +2177,11 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
 
 function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}) {
   const [expanded,setExpanded]=useState(false);
-  const brl=calcBRL(p.usd,settings);
-  const brlPago=p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):null;
-  const peso=pesoGramas(p);
+  const qtd=prodQtd(p);
+  const usdTotal=prodUSD(p);
+  const brl=calcBRL(usdTotal,settings);
+  const brlPago=p.dollarPago?calcBRLPago(usdTotal,settings,p.dollarPago):null;
+  const peso=prodPeso(p);
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
   const pc=prioColors[p.prioridade]||prioColors["Média"];
   return (
@@ -2187,7 +2195,9 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
           <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
             <div style={{fontWeight:600,fontSize:14,color:p.status==="comprado"?C.textLight:C.text,textDecoration:p.status==="comprado"?"line-through":"none",lineHeight:1.3,flex:1}}>{p.nome}</div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>US${p.usd}</div>
+              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>
+                {qtd>1?<>{fmtUSD(p.usd,2)}<span style={{fontSize:10,color:C.textLight}}>×{qtd}</span><br/><span style={{color:C.text}}>{fmtUSD(usdTotal,2)}</span></>:fmtUSD(p.usd,2)}
+              </div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,0)}</div>
             </div>
           </div>
@@ -2202,7 +2212,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais}
       </div>
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(p.usd,settings),2)}`,color:C.textMid}].map(({label,value,color})=>(
+          {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtd>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD total (×${qtd})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
               <span style={{fontSize:13,color:C.textMid}}>{label}</span>
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
@@ -2279,7 +2289,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
       if(p.status==="comprado")map[p.loja].comprados++;
       map[p.loja].usd+=p.usd;
       map[p.loja].brl+=calcBRL(p.usd,settings);
-      map[p.loja].peso+=pesoGramas(p);
+      map[p.loja].peso+=prodPeso(p);
     });
     return Object.entries(map).sort((a,b)=>b[1].usd-a[1].usd);
   },[produtos,settings]);
