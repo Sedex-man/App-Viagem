@@ -392,7 +392,18 @@ export default function App() {
   const [planejamento, setPlanejamento] = useState({ dataInicio:"", dataFim:"", eventos:[] });
   const [checklist, setChecklist] = useState([]);
   const [comprasDolar, setComprasDolar] = useState([]);
-  const [anotacoes, setAnotacoes] = useState("");
+  const [anotacoes, setAnotacoes] = useState(`WALMART:
+Mais afastado: 3101 W Princeton St Orlando, FL 32808, EUA
+Com itens da Disney: 8990 Turkey Lak RD, Orlando FL 32819, EUA
+
+TARGET:
+4750 Millenia Plazza Way, Orlando, FL 32839, EUA
+
+TJ MAXX:
+5748 Hamlin Groves Trail Winter Garden, FL 34787, EUA
+
+DOLLAR TREE:
+13605 SApopka Vineland Rd Ste 103A, Orlando, FL 32821`);
   const [showSettings, setShowSettings] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [showGastoForm, setShowGastoForm] = useState(false);
@@ -619,7 +630,7 @@ export default function App() {
       </div>
 
       <div style={S.content}>
-        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab}/>}
+        {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} anotacoes={anotacoes} setAnotacoes={setAnotacoes}/>}
         {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab}/>}
         {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
