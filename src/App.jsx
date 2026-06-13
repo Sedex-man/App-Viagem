@@ -575,7 +575,43 @@ DOLLAR TREE:
   }
 
   function updateProduto(id, campos) {
+    // Atualiza produtos
     setProdutos(ps => ps.map(p => p.id === id ? {...p, ...campos} : p));
+
+    // Sincroniza gastos em tempo real
+    if ('qtdComprada' in campos) {
+      const novaQtd = campos.qtdComprada;
+      if (novaQtd === 0) {
+        // Zerou: remove da aba de gastos
+        setGastos(gs => gs.filter(g => g.produtoId !== id));
+      } else {
+        // Atualiza qtd e recalcula usd no gasto
+        setProdutos(ps => {
+          const prod = ps.find(p => p.id === id);
+          if (!prod) return ps;
+          const novoUSD = usdComTaxa({...prod,...campos}) * novaQtd;
+          setGastos(gs => gs.map(g => g.produtoId === id
+            ? {...g, qtdComprada: novaQtd, usd: novoUSD}
+            : g
+          ));
+          return ps;
+        });
+      }
+    }
+    if ('localTaxa' in campos) {
+      // Taxa mudou: recalcular usd no gasto correspondente
+      setProdutos(ps => {
+        const prod = ps.find(p => p.id === id);
+        if (!prod) return ps;
+        const prodAtualizado = {...prod, ...campos};
+        const novoUSD = usdComTaxa(prodAtualizado) * prodQtd(prodAtualizado);
+        setGastos(gs => gs.map(g => g.produtoId === id
+          ? {...g, localTaxa: campos.localTaxa, usd: novoUSD}
+          : g
+        ));
+        return ps;
+      });
+    }
   }
 
   function moveToList(item) {
@@ -596,7 +632,7 @@ DOLLAR TREE:
     const comprados=produtos.filter(p=>p.status==="comprado");
     const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
     const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSD(p),0);
-    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRL(prodUSD(p),settings),0);
+    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProduto(p,settings),0);
     const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
     const totalMeusGastosUSD=calcTotalGastosUSD(gastos);
     return {total:produtos.length,comprados:comprados.length,pendentes:produtos.length-comprados.length,pesoTotal,valorTotalUSD,valorTotalBRL,valorGasto,lojas:new Set(produtos.map(p=>p.loja)).size,totalMeusGastosUSD};
