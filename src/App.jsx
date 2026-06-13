@@ -738,8 +738,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
           <div style={{display:"flex",alignItems:"center",gap:8}}>
             <span style={{fontSize:18}}>📝</span>
             <span style={{fontSize:14,fontWeight:700,color:C.text}}>Anotações</span>
-            {anotacoes&&<span style={{fontSize:11,background:C.primaryLight,color:C.primary,borderRadius:999,padding:"1px 8px",fontWeight:600}}>{anotacoes.split('
-').filter(Boolean).length} linha(s)</span>}
+            {anotacoes&&<span style={{fontSize:11,background:C.primaryLight,color:C.primary,borderRadius:999,padding:"1px 8px",fontWeight:600}}>{anotacoes.split("\n").filter(Boolean).length} linha(s)</span>}
           </div>
           <span style={{fontSize:12,color:C.textLight,fontWeight:600}}>{showNotas?"▲ Fechar":"▼ Abrir"}</span>
         </button>
