@@ -3,13 +3,15 @@ import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "firebase/auth";
 
 
 // ─── FIREBASE AUTH / FIRESTORE PERSISTENCE ────────────────────────────────
 // Cada usuário logado tem sua própria "caixinha" no Firestore.
 // Os dados ficam em: usuarios_pwa/{uid}
 const auth = getAuth();
+// Mantém o login salvo no aparelho, mesmo após fechar o navegador/app (login offline)
+setPersistence(auth, browserLocalPersistence).catch(err => console.error("Erro ao definir persistência do Auth:", err));
 
 const normalizeCloudState = data => ({
   settings: data?.settings || INITIAL_SETTINGS,
@@ -247,7 +249,14 @@ function ProductImage({ produto, style={}, iconSize=44, fit="cover" }) {
         src={imgUrl}
         alt={produto.nome}
         style={{ width: "100%", height: "100%", objectFit: fit }}
-        onError={() => setErr(true)}
+        onError={() => {
+          // Se a cópia offline (blob) falhar, tenta a URL direta cadastrada
+          if (imgUrl !== produto.imagem && produto.imagem) {
+            setImgUrl(produto.imagem);
+          } else {
+            setErr(true);
+          }
+        }}
       />
     </div>
   );
@@ -362,11 +371,16 @@ function LoginScreen() {
 
   async function entrar() {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
+    if (!navigator.onLine) { setErro("📡 Sem internet. Conecte-se à rede para fazer login."); return; }
     setLoading(true); setErro("");
     try {
       await signInWithEmailAndPassword(auth, email.trim(), senha);
     } catch (e) {
-      setErro(traduzErroAuth(e));
+      if (e?.code === "auth/network-request-failed" || e?.message?.includes("network")) {
+        setErro("📡 Falha na rede. Verifique sua conexão para fazer login.");
+      } else {
+        setErro(traduzErroAuth(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -375,11 +389,16 @@ function LoginScreen() {
   async function criarConta() {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
     if (senha.length < 6) { setErro("A senha precisa ter pelo menos 6 caracteres."); return; }
+    if (!navigator.onLine) { setErro("📡 Sem internet. Conecte-se à rede para criar a conta."); return; }
     setLoading(true); setErro("");
     try {
       await createUserWithEmailAndPassword(auth, email.trim(), senha);
     } catch (e) {
-      setErro(traduzErroAuth(e));
+      if (e?.code === "auth/network-request-failed" || e?.message?.includes("network")) {
+        setErro("📡 Falha na rede. Verifique sua conexão para criar a conta.");
+      } else {
+        setErro(traduzErroAuth(e));
+      }
     } finally {
       setLoading(false);
     }
