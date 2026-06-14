@@ -575,6 +575,20 @@ DOLLAR TREE:
     return () => clearTimeout(timer);
   }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes, cloudReady, userDocRef]);
 
+  // Mantém "Dólar pago" (cotação padrão) sincronizado com o Custo Médio Ponderado
+  // calculado a partir do histórico de compras de dólar (aba Câmbio).
+  useEffect(() => {
+    if (!cloudReady) return;
+    if (!Array.isArray(comprasDolar) || comprasDolar.length === 0) return;
+    const totalUSD = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0),0);
+    const totalBRL = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0)*(parseFloat(c.cotacao)||0),0);
+    if (totalUSD <= 0) return;
+    const custoMedio = Math.round((totalBRL/totalUSD)*10000)/10000;
+    if (custoMedio > 0 && custoMedio !== settings.dollarPago) {
+      setSettings(s => ({...s, dollarPago: custoMedio}));
+    }
+  }, [comprasDolar, cloudReady]);
+
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
 
   async function handleLogout() {
@@ -1939,6 +1953,20 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
         </div>
       </div>
 
+      {settings.totalDolarViagem>0&&(()=>{
+        const faltam=settings.totalDolarViagem-totalUSD;
+        const metaAtingida=faltam<=0;
+        return (
+          <div style={{...S.card,marginBottom:14,background:metaAtingida?"#ECFDF5":"#FFF7ED",border:`1px solid ${metaAtingida?"#10B981":"#FFEDD5"}`,textAlign:"center"}}>
+            <div style={{fontSize:11,fontWeight:600,color:metaAtingida?"#065F46":"#9A3412"}}>{metaAtingida?"🎯 Meta atingida!":"📉 Falta comprar"}</div>
+            <div style={{fontSize:18,fontWeight:800,color:metaAtingida?"#10B981":"#EA580C",marginTop:4,fontFamily:"'DM Mono',monospace"}}>
+              {metaAtingida?`+${fmtUSD(Math.abs(faltam))} acima da meta`:fmtUSD(faltam)}
+            </div>
+            <div style={{fontSize:11,color:C.textLight,marginTop:4}}>Meta: {fmtUSD(settings.totalDolarViagem)} · Comprado: {fmtUSD(totalUSD)}</div>
+          </div>
+        );
+      })()}
+
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
         {showForm?"Cancelar":"＋ Registrar compra de dólar"}
       </button>
@@ -3117,6 +3145,7 @@ function SettingsModal({settings,onSave,onImport,onExport,onClose}) {
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>💵 Dólar pago</div>
           <label style={S.label}>Quanto você pagou pelo dólar (R$)</label>
           <input style={S.input} type="number" inputMode="decimal" step="0.0001" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
+          <div style={{fontSize:11,color:C.textLight,marginTop:-8,marginBottom:14}}>💡 Atualizado automaticamente pelo Custo Médio Ponderado da aba Câmbio/Dólar, se houver compras registradas.</div>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10,marginTop:4}}>📊 Taxas (para cálculo do custo real)</div>
           {[["IOF (%)","iof","0.01"],["Spread (%)","spread","0.01"],["Taxa de compra (%)","taxa","0.1"]].map(([l,f,st])=>(
             <div key={f} style={{marginBottom:12}}>
