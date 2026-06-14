@@ -248,6 +248,7 @@ function ProductImage({ produto, style={}, iconSize=44, fit="cover" }) {
       <img
         src={imgUrl}
         alt={produto.nome}
+        loading="lazy"
         style={{ width: "100%", height: "100%", objectFit: fit }}
         onError={() => {
           // Se a cópia offline (blob) falhar, tenta a URL direta cadastrada
@@ -479,6 +480,7 @@ DOLLAR TREE:
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | synced | error
   const skipNextCloudSave = useRef(false);
   const skipNextSnapshot = useRef(false);
   const userDocRef = useMemo(() => user ? doc(db, "usuarios_pwa", user.uid) : null, [user]);
@@ -538,7 +540,7 @@ DOLLAR TREE:
       setPlanejamento(cloudState.planejamento || { dataInicio:"", dataFim:"", eventos:[] });
       setChecklist(cloudState.checklist || []);
       setComprasDolar(cloudState.comprasDolar || []);
-      setAnotacoes(cloudState.anotacoes || 'Casa:\n\n5015 Tideview Circle, Orlando, Flórida 32819, Estados Unidos\n\nWALMART:\n\nMais afastado: 3101 W Princeton St, Orlando, FL 32808, EUA\n\nCom itens da Disney: 8990 Turkey Lake Rd, Orlando FL 32819, EUA\n\nTARGET:\n\n4750 Millenia Plaza Way, Orlando, FL 32839, EUA\n\nTJ MAXX:\n\n5748 Hamlin Groves Trail, Winter Garden, FL 34787, EUA\n\nDOLLAR TREE:\n\n13605 S Apopka Vineland Rd Ste 103A, Orlando, FL 32821');
+      setAnotacoes(cloudState.anotacoes || 'WALMART:\n\nMais afastado: 3101 W Princeton St, Orlando, FL 32808, EUA\n\nCom itens da Disney: 8990 Turkey Lake Rd, Orlando FL 32819, EUA\n\nTARGET:\n\n4750 Millenia Plaza Way, Orlando, FL 32839, EUA\n\nTJ MAXX:\n\n5748 Hamlin Groves Trail, Winter Garden, FL 34787, EUA\n\nDOLLAR TREE:\n\n13605 S Apopka Vineland Rd Ste 103A, Orlando, FL 32821');
       setCloudReady(true);
     }, (error) => {
       console.error("Erro ao sincronizar com Firestore:", error);
@@ -557,13 +559,16 @@ DOLLAR TREE:
       return;
     }
 
+    setSyncStatus("saving");
     const timer = setTimeout(() => {
       skipNextSnapshot.current = true;
       saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
+        .then(() => setSyncStatus("synced"))
         .catch((error) => {
           console.error("Erro ao salvar no Firestore:", error);
           notify("Erro ao salvar na nuvem", "error");
           skipNextSnapshot.current = false;
+          setSyncStatus("error");
         });
     }, 350);
 
@@ -945,6 +950,7 @@ DOLLAR TREE:
           </div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <SyncIndicator status={syncStatus}/>
           <button style={{...S.settingsBtn,width:"auto",padding:"0 10px",fontSize:12,fontWeight:700,color:C.textMid}} onClick={handleLogout}>Sair</button>
           <button style={S.settingsBtn} onClick={()=>setShowSettings(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.textMid} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -1188,6 +1194,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
 function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,onToggleStatus,parcelas}) {
   const [filtro,setFiltro]=useState("todos");
   const [subTab,setSubTab]=useState("gastos");
+  const [busca,setBusca]=useState("");
 
   const totalUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g,produtos),0);
   const aReceberUSD=gastos.reduce((a,g)=>{
@@ -1196,8 +1203,13 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
   },0);
 
   const filtrados=gastos.filter(g=>{
-    if(filtro==="compras") return g.tipo==="produto";
-    if(filtro==="livres") return g.tipo!=="produto";
+    if(filtro==="compras"&&g.tipo!=="produto") return false;
+    if(filtro==="livres"&&g.tipo==="produto") return false;
+    if(busca){
+      const termo=busca.toLowerCase();
+      const match=(g.descricao||"").toLowerCase().includes(termo)||(g.loja||"").toLowerCase().includes(termo);
+      if(!match) return false;
+    }
     return true;
   }).sort((a,b)=>(b.id||0)-(a.id||0));
 
@@ -1229,13 +1241,15 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
       </div>
 
       {/* Filtros */}
+      <input style={S.searchInput} placeholder="🔍 Buscar por descrição ou loja..." value={busca} onChange={e=>setBusca(e.target.value)}/>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
         {[["todos","Todos"],["compras","🛍 Compras"],["livres","✏ Manuais"]].map(([v,l])=>(
           <button key={v} style={{flex:1,padding:"8px 4px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:filtro===v?C.bgCard:"transparent",color:filtro===v?C.primary:C.textMid,boxShadow:filtro===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setFiltro(v)}>{l}</button>
         ))}
       </div>
 
-      {filtrados.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente."/>}
+      {filtrados.length===0&&gastos.length>0&&<Empty text="Nenhum gasto encontrado"/>}
+      {gastos.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente." actionLabel="＋ Adicionar gasto" onAction={onAdd}/>}
 
       {filtrados.map(g=><GastoCard key={g.id} g={g} settings={settings} onEdit={()=>onEdit(g)} onDelete={()=>onDelete(g.id)} onTogglePago={onTogglePago} produtos={produtos}/>)}
       </>}
@@ -1355,13 +1369,25 @@ function GastoForm({gasto,settings,onSave,onClose}) {
 
   function addPessoa(){
     if(!novaPessoa.trim())return;
-    const qtd=f.divisao.length+2; // +1 nova pessoa +1 eu
-    const valorPadrao=totalUSD>0?parseFloat((totalUSD/qtd).toFixed(2)):0;
-    setF(p=>({...p,divisao:[...p.divisao,{nome:novaPessoa.trim(),pago:false,valor:valorPadrao}]}));
+    const novaLista=[...f.divisao,{nome:novaPessoa.trim(),pago:false,valor:0}];
+    const n=1+novaLista.length;
+    const parteIgual=totalUSD>0?parseFloat((totalUSD/n).toFixed(2)):0;
+    setF(p=>({...p,divisao:novaLista.map(d=>({...d,valor:parteIgual}))}));
     setNovaPessoa("");
   }
   function removePessoa(i){setF(p=>({...p,divisao:p.divisao.filter((_,idx)=>idx!==i)}));}
   function updateValor(i,val){setF(p=>({...p,divisao:p.divisao.map((item,idx)=>idx===i?{...item,valor:parseFloat(val)||0}:item)}));}
+  function distribuirIgualmente(){
+    if(f.divisao.length===0||totalUSD<=0)return;
+    const n=1+f.divisao.length;
+    const base=Math.floor((totalUSD/n)*100)/100; // arredonda para baixo, em centavos
+    const resto=Math.round((totalUSD-base*n)*100)/100; // sobra de centavos
+    setF(p=>({...p,divisao:p.divisao.map((item,idx)=>({
+      ...item,
+      // a sobra de centavos vai para a última pessoa da lista
+      valor: idx===p.divisao.length-1 ? Math.round((base+resto)*100)/100 : base
+    }))}));
+  }
 
   function handleSave(){
     if(!f.descricao)return alert("Informe a descrição");
@@ -1380,7 +1406,17 @@ function GastoForm({gasto,settings,onSave,onClose}) {
       <label style={S.label}>Local / Loja (opcional)</label>
       <input style={S.input} placeholder="Ex: McDonald's International Drive" value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
       <label style={S.label}>Valor em USD *</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Ex: 45.90" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 45.90" value={f.usd} onChange={e=>{
+        const novoValor=e.target.value;
+        const novoTotal=parseFloat(novoValor)||0;
+        const somaAtual=f.divisao.reduce((a,p)=>a+(parseFloat(p.valor)||0),0);
+        setF(p=>({
+          ...p,
+          usd:novoValor,
+          // Mantém a proporção de cada parte ao mudar o total (preserva ajustes manuais)
+          divisao: somaAtual>0 ? p.divisao.map(d=>({...d,valor:Math.round((parseFloat(d.valor)||0)*(novoTotal/somaAtual)*100)/100})) : p.divisao
+        }));
+      }}/>
       <div style={{background:C.primaryLight,border:`1px solid ${C.primary}22`,borderRadius:9,padding:"8px 12px",fontSize:12,color:C.textMid,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
         <span>Cotação do dólar pago: <strong style={{color:C.primary}}>{fmtBRL((parseFloat(f.dolarPago)||settings.dollarPago),4)}</strong></span>
         <span style={{color:C.textLight,fontSize:11}}>automática das configurações</span>
@@ -1421,7 +1457,7 @@ function GastoForm({gasto,settings,onSave,onClose}) {
             <div style={{display:"flex",alignItems:"center",gap:4}}>
               <span style={{fontSize:11,color:C.textLight}}>US$</span>
               <input
-                type="number" step="0.01"
+                type="number" inputMode="decimal" step="0.01"
                 value={p.valor||""}
                 onChange={e=>updateValor(i,e.target.value)}
                 style={{width:76,background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 7px",fontSize:13,color:C.text,fontFamily:"'DM Mono',monospace",outline:"none",boxSizing:"border-box"}}
@@ -1437,6 +1473,9 @@ function GastoForm({gasto,settings,onSave,onClose}) {
               <div style={{fontSize:11,color:C.warning,marginTop:4,fontWeight:500}}>⚠ Soma das partes ({fmtUSD((somaDivisao+minhaParteUSD),2)}) ≠ total ({fmtUSD(totalUSD,2)})</div>
             )}
           </div>
+        )}
+        {f.divisao.length>0&&totalUSD>0&&(
+          <button style={{...S.btnOutline,width:"100%",marginTop:8,justifyContent:"center"}} onClick={distribuirIgualmente}>⚖ Distribuir igualmente</button>
         )}
       </div>
       <button style={S.btnPrimary} onClick={handleSave}>{gasto?.id?"Salvar alterações":"Adicionar gasto"}</button>
@@ -1610,7 +1649,7 @@ function RoteiroTab({ planejamento, setPlanejamento }) {
         <button style={{...S.btnPrimary,padding:"7px 14px",fontSize:13,marginBottom:0,width:"auto"}} onClick={()=>{setEditEvento(null);setShowEventoForm(true);}}>＋ Evento</button>
       </div>
 
-      {(eventos||[]).length===0&&<Empty text="Nenhum evento. Toque em ＋ ou clique em um dia no calendário."/>}
+      {(eventos||[]).length===0&&<Empty text="Nenhum evento. Toque em ＋ ou clique em um dia no calendário." actionLabel="＋ Adicionar evento" onAction={()=>{setEditEvento(null);setShowEventoForm(true);}}/>}
 
       {Object.keys(eventosPorData).sort().map(data=>(
         <div key={data} style={{marginBottom:12}}>
@@ -1756,10 +1795,10 @@ function ConversorTab({settings}) {
       <div style={S.sectionLabel}>💵 Conversor USD → BRL</div>
       <div style={S.card}>
         <label style={S.label}>Valor em USD</label>
-        <input style={S.input} type="number" placeholder="Ex: 150" value={usdN} onChange={e=>setUsdN(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 150" value={usdN} onChange={e=>setUsdN(e.target.value)}/>
         {usdN&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>BRL estimado</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brlP)}</span></div>}
         <label style={{...S.label,marginTop:8}}>Dólar que você pagou (opcional)</label>
-        <input style={S.input} type="number" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
         {brlC&&parseFloat(usdN)>0&&[{label:"Com seu dólar",value:fmtBRL(brlC),color:C.success},{label:"Diferença",value:fmtBRL(brlP-brlC),color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
           <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{label}</span><span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span></div>
         ))}
@@ -1767,13 +1806,13 @@ function ConversorTab({settings}) {
       <div style={S.sectionLabel}>⚖ Conversor de Peso</div>
       <div style={S.card}>
         <label style={S.label}>Libras (lbs)</label>
-        <input style={S.input} type="number" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
         {lbs&&[[`Gramas`,`${fmtN(parseFloat(lbs)*453.592,1)}g`],[`Kg`,`${fmtN(parseFloat(lbs)*0.453592,3)}kg`],["Oz",`${fmtN(parseFloat(lbs)*16,1)} oz`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
         <div style={{height:12}}/>
         <label style={S.label}>Onças (oz)</label>
-        <input style={S.input} type="number" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
         {oz&&[["Gramas",`${fmtN(parseFloat(oz)*28.3495,1)}g`],["Kg",`${fmtN(parseFloat(oz)*28.3495/1000,3)}kg`],["Libras",`${fmtN(parseFloat(oz)/16,3)} lbs`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
@@ -1910,8 +1949,8 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
           <label style={S.label}>Data</label>
           <input style={S.input} type="date" value={f.data} onChange={e=>setF(p=>({...p,data:e.target.value}))}/>
           <div style={{display:"flex",gap:10}}>
-            <div style={{flex:1}}><label style={S.label}>Quantidade (US$)</label><input style={S.input} type="number" step="50" placeholder="Ex: 500" value={f.quantidade} onChange={e=>setF(p=>({...p,quantidade:e.target.value}))}/></div>
-            <div style={{flex:1}}><label style={S.label}>Cotação (R$)</label><input style={S.input} type="number" step="0.01" placeholder="Ex: 5.65" value={f.cotacao} onChange={e=>setF(p=>({...p,cotacao:e.target.value}))}/></div>
+            <div style={{flex:1}}><label style={S.label}>Quantidade (US$)</label><input style={S.input} type="number" inputMode="decimal" step="50" placeholder="Ex: 500" value={f.quantidade} onChange={e=>setF(p=>({...p,quantidade:e.target.value}))}/></div>
+            <div style={{flex:1}}><label style={S.label}>Cotação (R$)</label><input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 5.65" value={f.cotacao} onChange={e=>setF(p=>({...p,cotacao:e.target.value}))}/></div>
           </div>
           {f.quantidade&&f.cotacao&&<div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginBottom:12}}>Total: {fmtBRL(parseFloat(f.quantidade)*parseFloat(f.cotacao))}</div>}
           <label style={S.label}>Observação (opcional)</label>
@@ -1920,7 +1959,7 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
         </div>
       )}
 
-      {comprasDolar.length===0&&<Empty text="Nenhuma compra registrada ainda."/>}
+      {comprasDolar.length===0&&<Empty text="Nenhuma compra registrada ainda." actionLabel="＋ Registrar compra" onAction={()=>setShowForm(true)}/>}
       {[...comprasDolar].reverse().map(c=>(
         <div key={c.id} style={{...S.card,marginBottom:8,padding:"10px 14px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -2213,7 +2252,7 @@ function ParcelasTab({ parcelas, setParcelas }) {
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={abrirNova}>＋ Nova parcela</button>
 
-      {parcelas.length === 0 && <Empty text="Nenhuma parcela cadastrada ainda."/>}
+      {parcelas.length === 0 && <Empty text="Nenhuma parcela cadastrada ainda." actionLabel="＋ Nova parcela" onAction={abrirNova}/>}
 
       {parcelas.map(p => (
         <ParcelaCard
@@ -2448,13 +2487,13 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       <input style={S.input} placeholder="Ex: Passagem aérea, Hotel, Ingressos..." value={f.descricao} onChange={e => setF(p => ({...p, descricao: e.target.value}))}/>
 
       <label style={S.label}>Valor Total (R$)</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Ex: 2500.00" value={f.valorTotal||""} onChange={e => setF(p => ({...p, valorTotal: e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 2500.00" value={f.valorTotal||""} onChange={e => setF(p => ({...p, valorTotal: e.target.value}))}/>
 
       <label style={S.label}>Quantidade de Parcelas *</label>
-      <input style={S.input} type="number" step="1" min="1" max="24" placeholder="Ex: 10" value={f.quantidadeParcelas||""} onChange={e => setF(p => ({...p, quantidadeParcelas: e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="numeric" step="1" min="1" max="24" placeholder="Ex: 10" value={f.quantidadeParcelas||""} onChange={e => setF(p => ({...p, quantidadeParcelas: e.target.value}))}/>
 
       <label style={S.label}>Valor da Parcela (R$)</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Calculado automaticamente" value={f.valorParcela||""} onChange={e => setF(p => ({...p, valorParcela: e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Calculado automaticamente" value={f.valorParcela||""} onChange={e => setF(p => ({...p, valorParcela: e.target.value}))}/>
 
       <label style={S.label}>Cartão / Forma de Pagamento</label>
       <input style={S.input} placeholder="Ex: Nubank, Itaú, C6..." value={f.cartao||""} onChange={e => setF(p => ({...p, cartao: e.target.value}))}/>
@@ -2469,11 +2508,11 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <div style={{flex:1}}>
           <label style={S.label}>Dividido entre (pessoas)</label>
-          <input style={S.input} type="number" min="2" step="1" placeholder="Ex: 2" value={f.nPessoas||""} onChange={e => setF(p => ({...p, nPessoas: e.target.value}))}/>
+          <input style={S.input} type="number" inputMode="numeric" min="2" step="1" placeholder="Ex: 2" value={f.nPessoas||""} onChange={e => setF(p => ({...p, nPessoas: e.target.value}))}/>
         </div>
         <div style={{flex:1}}>
           <label style={S.label}>Minha parte (R$)</label>
-          <input style={S.input} type="number" step="0.01" placeholder="Calculado auto." value={f.minhaParte||""} onChange={e => setF(p => ({...p, minhaParte: e.target.value}))}/>
+          <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Calculado auto." value={f.minhaParte||""} onChange={e => setF(p => ({...p, minhaParte: e.target.value}))}/>
         </div>
       </div>
 
@@ -2521,6 +2560,7 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
       <div style={{fontSize:12,color:C.textLight,marginBottom:10,fontWeight:500}}>{filtered.length} item(s)</div>
       {filtered.map(p=><ProdutoCard key={p.id} p={p} settings={settings} onToggle={subTab==="compras"?()=>onToggle(p.id):null} onDelete={()=>onDelete(p.id,subTab==="legais"?"legais":"produtos")} onEdit={()=>onEdit({...p,_legais:subTab==="legais"})} onMoveToList={subTab==="legais"?()=>onMoveToList(p):null} isLegais={subTab==="legais"} onUpdate={onUpdate}/>)}
       {filtered.length===0&&lista.length>0&&<Empty text="Nenhum item encontrado"/>}
+      {lista.length===0&&<Empty text="Nenhum item cadastrado ainda." actionLabel="＋ Adicionar item" onAction={onAdd}/>}
     </div>
   );
 }
@@ -3076,22 +3116,22 @@ function SettingsModal({settings,onSave,onImport,onExport,onClose}) {
         <>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>💵 Dólar pago</div>
           <label style={S.label}>Quanto você pagou pelo dólar (R$)</label>
-          <input style={S.input} type="number" step="0.0001" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
+          <input style={S.input} type="number" inputMode="decimal" step="0.0001" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10,marginTop:4}}>📊 Taxas (para cálculo do custo real)</div>
           {[["IOF (%)","iof","0.01"],["Spread (%)","spread","0.01"],["Taxa de compra (%)","taxa","0.1"]].map(([l,f,st])=>(
             <div key={f} style={{marginBottom:12}}>
               <label style={S.label}>{l}</label>
-              <input style={S.input} type="number" step={st} value={s[f]} onChange={e=>setS(p=>({...p,[f]:parseFloat(e.target.value)||0}))}/>
+              <input style={S.input} type="number" inputMode="decimal" step={st} value={s[f]} onChange={e=>setS(p=>({...p,[f]:parseFloat(e.target.value)||0}))}/>
             </div>
           ))}
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>✈ Viagem</div>
           <div style={{marginBottom:12}}>
             <label style={S.label}>Total de dólares que está levando (US$)</label>
-            <input style={S.input} type="number" step="100" value={s.totalDolarViagem} onChange={e=>setS(p=>({...p,totalDolarViagem:parseFloat(e.target.value)||0}))}/>
+            <input style={S.input} type="number" inputMode="decimal" step="100" value={s.totalDolarViagem} onChange={e=>setS(p=>({...p,totalDolarViagem:parseFloat(e.target.value)||0}))}/>
           </div>
           <div style={{marginBottom:12}}>
             <label style={S.label}>Peso máximo da mala (kg)</label>
-            <input style={S.input} type="number" step="0.5" placeholder="23" value={(s.pesoMax/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})} onChange={e=>setS(p=>({...p,pesoMax:Math.round((parseFloat(e.target.value.replace(",","."))||0)*1000)}))}/>
+            <input style={S.input} type="number" inputMode="decimal" step="0.5" placeholder="23" value={(s.pesoMax/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})} onChange={e=>setS(p=>({...p,pesoMax:Math.round((parseFloat(e.target.value.replace(",","."))||0)*1000)}))}/>
           </div>
           <button style={S.btnPrimary} onClick={()=>onSave(s)}>Salvar configurações</button>
         </>
@@ -3144,20 +3184,21 @@ function ProdutoForm({prod,onSave,onClose}) {
       <label style={S.label}>Quantidade</label>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <button onClick={()=>setF(p=>({...p,quantidade:Math.max(1,(parseInt(p.quantidade)||1)-1)}))} style={{width:36,height:36,borderRadius:9,border:`1px solid ${C.border}`,background:C.bg,fontSize:18,cursor:"pointer",color:C.text,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>−</button>
-        <input style={{...S.input,marginBottom:0,textAlign:"center",fontWeight:700,fontSize:16}} type="number" min="1" value={f.quantidade||1} onChange={e=>setF(p=>({...p,quantidade:Math.max(1,parseInt(e.target.value)||1)}))}/>
+        <input style={{...S.input,marginBottom:0,textAlign:"center",fontWeight:700,fontSize:16}} type="number" inputMode="numeric" min="1" value={f.quantidade||1} onChange={e=>setF(p=>({...p,quantidade:Math.max(1,parseInt(e.target.value)||1)}))}/>
         <button onClick={()=>setF(p=>({...p,quantidade:(parseInt(p.quantidade)||1)+1}))} style={{width:36,height:36,borderRadius:9,border:`1px solid ${C.border}`,background:C.bg,fontSize:18,cursor:"pointer",color:C.text,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>＋</button>
       </div>
       <label style={S.label}>Loja</label>
       <input style={S.input} list="lojas-list" placeholder="Digite ou escolha uma loja..." value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
       <datalist id="lojas-list">{LOJAS_SUGESTOES.map(l=><option key={l} value={l}/>)}</datalist>
       <label style={S.label}>Preço USD *</label>
-      <input style={S.input} type="number" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
       <div style={{ marginBottom: 14 }}>
         <label style={S.label}>Peso / Volume</label>
         <div style={{ display: "flex", gap: 8 }}>
           <input
             style={{ ...S.input, marginBottom: 0, flex: 1 }}
             type="number"
+            inputMode="decimal"
             placeholder="0"
             value={f.peso}
             onChange={e=>setF(p=>({...p,peso:e.target.value}))}
@@ -3179,7 +3220,7 @@ function ProdutoForm({prod,onSave,onClose}) {
         <div style={{display:"flex",gap:8,marginBottom:14}}>{PRIORIDADES.map(pr=><button key={pr} style={{...S.chipSel,flex:1,...(f.prioridade===pr?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,prioridade:pr}))}>{pr}</button>)}</div>
         <label style={S.label}>Status</label>
         <div style={{display:"flex",gap:8,marginBottom:14}}>{[["pendente","⏳ Pendente"],["comprado","✅ Comprado"]].map(([v,l])=><button key={v} style={{...S.chipSel,flex:1,...(f.status===v?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,status:v}))}>{l}</button>)}</div>
-        {f.status==="comprado"&&<><label style={S.label}>Dólar pago (R$)</label><input style={S.input} type="number" step="0.01" placeholder="5.71" value={f.dollarPago} onChange={e=>setF(p=>({...p,dollarPago:e.target.value}))}/></>}
+        {f.status==="comprado"&&<><label style={S.label}>Dólar pago (R$)</label><input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="5.71" value={f.dollarPago} onChange={e=>setF(p=>({...p,dollarPago:e.target.value}))}/></>}
       </>)}
       <label style={S.label}>Link (para buscar imagem)</label>
       <input style={S.input} type="url" placeholder="https://amazon.com/..." value={f.link} onChange={e=>setF(p=>({...p,link:e.target.value}))}/>
@@ -3201,8 +3242,37 @@ function Modal({title,onClose,children}) {
     </div>
   );
 }
-function Empty({text}) {
-  return <div style={{textAlign:"center",padding:"40px 0"}}><div style={{fontSize:36,marginBottom:10}}>📭</div><div style={{fontSize:13,color:C.textLight,fontWeight:500}}>{text}</div></div>;
+function SyncIndicator({status}) {
+  const [online,setOnline]=useState(typeof navigator!=="undefined"?navigator.onLine:true);
+  useEffect(()=>{
+    const goOnline=()=>setOnline(true), goOffline=()=>setOnline(false);
+    window.addEventListener("online",goOnline);
+    window.addEventListener("offline",goOffline);
+    return ()=>{ window.removeEventListener("online",goOnline); window.removeEventListener("offline",goOffline); };
+  },[]);
+
+  let icon="☁️", label="Sincronizado", color=C.success;
+  if (!online) { icon="📡"; label="Offline"; color=C.textLight; }
+  else if (status==="saving") { icon="⏳"; label="Salvando..."; color=C.textMid; }
+  else if (status==="error") { icon="⚠️"; label="Erro ao salvar"; color=C.danger; }
+  else if (status==="idle") { icon="☁️"; label="Sincronizado"; color=C.textLight; }
+
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:4,fontSize:11,fontWeight:600,color,padding:"4px 8px",borderRadius:999,background:C.borderLight,flexShrink:0,whiteSpace:"nowrap"}} title={label}>
+      <span style={{fontSize:12}}>{icon}</span>
+      <span className="sync-label">{label}</span>
+    </div>
+  );
+}
+
+function Empty({text,actionLabel,onAction}) {
+  return (
+    <div style={{textAlign:"center",padding:"40px 0"}}>
+      <div style={{fontSize:36,marginBottom:10}}>📭</div>
+      <div style={{fontSize:13,color:C.textLight,fontWeight:500,marginBottom:onAction?16:0}}>{text}</div>
+      {onAction&&<button style={{...S.btnPrimary,display:"inline-flex",width:"auto",padding:"10px 20px"}} onClick={onAction}>{actionLabel}</button>}
+    </div>
+  );
 }
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
@@ -3259,6 +3329,7 @@ const CSS=`
   .notif-error{background:#FEF2F2;border:1px solid #EF444433;color:#DC2626;}
   @keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
   .galeria-card:active{transform:scale(0.98);}
+  @media (max-width: 420px){ .sync-label{display:none;} }
   .spinner{width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:#2563EB;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
   @keyframes spin{to{transform:rotate(360deg);}}
 `;
