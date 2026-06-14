@@ -1,7 +1,6 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
-import { salvarDocumento, listarDocumentos, obterDocumento, removerDocumento, fileToBase64 } from './docStorage';
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "firebase/auth";
@@ -2175,134 +2174,6 @@ function ChecklistTab({checklist, setChecklist}) {
   );
 }
 
-// ─── DOCUMENTOS (armazenamento offline via IndexedDB) ──────────────────────────
-const DOC_ICONS = {
-  "application/pdf": "📄",
-  "application/msword": "📝",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "📝",
-  "image/": "🖼️",
-};
-function docIcon(mimeType) {
-  if (!mimeType) return "📎";
-  for (const [prefix, icon] of Object.entries(DOC_ICONS)) {
-    if (mimeType.startsWith(prefix)) return icon;
-  }
-  return "📎";
-}
-
-function DocumentosTab() {
-  const [documentos, setDocumentos] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [f, setF] = useState({texto:"", file:null});
-  const [viewer, setViewer] = useState(null); // {nome, mimeType, data}
-  const fileRef = useRef(null);
-
-  async function carregar() {
-    try {
-      const docs = await listarDocumentos();
-      setDocumentos(docs.sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0)));
-    } catch (e) {
-      console.error("Erro ao listar documentos:", e);
-    }
-    setLoading(false);
-  }
-
-  useEffect(() => { carregar(); }, []);
-
-  async function salvar() {
-    if (!f.file && !f.texto.trim()) return alert("Selecione um arquivo ou escreva um texto.");
-    let dados = { id: Date.now(), texto: f.texto.trim(), criadoEm: Date.now() };
-    if (f.file) {
-      const base64 = await fileToBase64(f.file);
-      dados = { ...dados, fileName: f.file.name, mimeType: f.file.type, data: base64 };
-    }
-    await salvarDocumento(dados);
-    setF({texto:"", file:null});
-    if (fileRef.current) fileRef.current.value = "";
-    setShowForm(false);
-    carregar();
-  }
-
-  async function remover(id) {
-    if (!confirm("Remover este documento?")) return;
-    await removerDocumento(id);
-    carregar();
-  }
-
-  async function abrir(item) {
-    if (!item.data) return;
-    const doc = await obterDocumento(item.id);
-    setViewer(doc);
-  }
-
-  function baixar(item) {
-    if (!item.data) return;
-    const a = document.createElement("a");
-    a.href = item.data;
-    a.download = item.fileName || "documento";
-    a.click();
-  }
-
-  return (
-    <>
-      <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#0369A1"}}>📦 Os documentos ficam salvos no seu aparelho (offline) e podem ser abertos sem internet.</div>
-      </div>
-
-      <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
-        {showForm?"Cancelar":"＋ Adicionar documento"}
-      </button>
-
-      {showForm&&(
-        <div style={{...S.card,marginBottom:14}}>
-          <label style={S.label}>Arquivo (PDF, imagem, Word...)</label>
-          <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,image/*" onChange={e=>setF(p=>({...p,file:e.target.files[0]||null}))} style={{...S.input,padding:"8px 10px"}}/>
-          <label style={S.label}>Anotação / Descrição</label>
-          <textarea style={{...S.input,minHeight:80,resize:"vertical",fontFamily:"'Inter',sans-serif"}} placeholder="Ex: Voucher do hotel, passagem aérea, comprovante..." value={f.texto} onChange={e=>setF(p=>({...p,texto:e.target.value}))}/>
-          <button style={S.btnPrimary} onClick={salvar}>Salvar documento</button>
-        </div>
-      )}
-
-      {loading&&<Empty text="Carregando documentos..."/>}
-      {!loading&&documentos.length===0&&<Empty text="Nenhum documento salvo ainda." actionLabel="＋ Adicionar documento" onAction={()=>setShowForm(true)}/>}
-
-      {documentos.map(item=>(
-        <div key={item.id} style={{...S.card,marginBottom:8,padding:"12px 14px"}}>
-          <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
-            <div style={{fontSize:28,flexShrink:0}}>{docIcon(item.mimeType)}</div>
-            <div style={{flex:1,minWidth:0}}>
-              {item.fileName&&<div style={{fontSize:13,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.fileName}</div>}
-              {item.texto&&<div style={{fontSize:12,color:C.textMid,marginTop:item.fileName?2:0,whiteSpace:"pre-wrap"}}>{item.texto}</div>}
-              <div style={{fontSize:11,color:C.textLight,marginTop:4}}>{new Date(item.criadoEm).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</div>
-              <div style={{display:"flex",gap:8,marginTop:8}}>
-                {item.data&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>abrir(item)}>👁 Abrir</button>}
-                {item.data&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>baixar(item)}>⬇ Baixar</button>}
-                <button style={{...S.btnOutline,padding:"6px 12px",fontSize:12,color:C.danger,borderColor:C.danger+"44"}} onClick={()=>remover(item.id)}>🗑</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-
-      {viewer&&(
-        <Modal title={viewer.fileName||"Documento"} onClose={()=>setViewer(null)}>
-          {viewer.mimeType?.startsWith("image/")&&<img src={viewer.data} alt={viewer.fileName} style={{width:"100%",borderRadius:10}}/>}
-          {viewer.mimeType==="application/pdf"&&<iframe src={viewer.data} title={viewer.fileName} style={{width:"100%",height:"70vh",border:"none",borderRadius:10}}/>}
-          {!viewer.mimeType?.startsWith("image/")&&viewer.mimeType!=="application/pdf"&&(
-            <div style={{textAlign:"center",padding:"24px 0"}}>
-              <div style={{fontSize:40,marginBottom:10}}>{docIcon(viewer.mimeType)}</div>
-              <div style={{fontSize:13,color:C.textMid,marginBottom:14}}>Pré-visualização não disponível para este tipo de arquivo.</div>
-              <button style={S.btnPrimary} onClick={()=>baixar(viewer)}>⬇ Baixar arquivo</button>
-            </div>
-          )}
-          {viewer.texto&&<div style={{marginTop:12,fontSize:13,color:C.textMid,whiteSpace:"pre-wrap"}}>{viewer.texto}</div>}
-        </Modal>
-      )}
-    </>
-  );
-}
-
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
 const MESES_LABELS = ["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
 const MESES_NOMES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
@@ -2842,28 +2713,22 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
 // ─── GALERIA TAB ──────────────────────────────────────────────────────────────
 function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal,onUpdate,onUpdateLegal}) {
   const [subTab,setSubTab]=useState("compras");
-  const [filterLoja,setFilterLoja]=useState("Todas");
-  const [selectedIdx,setSelectedIdx]=useState(null);
-  const listaCompleta=subTab==="legais"?itensLegais:produtos;
+  const [selected,setSelected]=useState(null);
+  const lista=subTab==="legais"?itensLegais:produtos;
   const isLegais=subTab==="legais";
-  const lista=useMemo(()=>filterLoja==="Todas"?listaCompleta:listaCompleta.filter(p=>p.loja===filterLoja),[listaCompleta,filterLoja]);
-  const selected=selectedIdx!=null?lista[selectedIdx]:null;
   return (
     <div style={S.page}>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
         {[["compras","🛒 Compras"],["legais","✨ Legais"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>{setSubTab(v);setFilterLoja("Todas");}}>{l}</button>
+          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
         ))}
-      </div>
-      <div style={S.filterRow}>
-        {["Todas",...new Set(listaCompleta.map(p=>p.loja||"Não especificada"))].map(l=><button key={l} style={{...S.chip,...(filterLoja===l?S.chipActive:{})}} onClick={()=>setFilterLoja(l)}>{l}</button>)}
       </div>
       <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
         <div style={{fontSize:12,color:"#0369A1"}}>🔍 Imagens buscadas via og:image do link ou DuckDuckGo. Adicione o link do produto para melhor resultado.</div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        {lista.map((p,i)=>(
-          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>setSelectedIdx(i)} className="galeria-card">
+        {lista.map(p=>(
+          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>setSelected(p)} className="galeria-card">
             <div style={{height:120,position:"relative",overflow:"hidden"}}>
               <ProductImage produto={p} iconSize={40}/>
               {p.status==="comprado"&&<div style={{position:"absolute",top:8,right:8,background:C.success,borderRadius:999,padding:"2px 8px",fontSize:10,color:"white",fontWeight:700}}>✓ Comprado</div>}
@@ -2882,43 +2747,33 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal
         p={selected}
         settings={settings}
         isLegais={isLegais}
-        onClose={()=>setSelectedIdx(null)}
-        onPrev={selectedIdx>0?()=>setSelectedIdx(i=>i-1):null}
-        onNext={selectedIdx<lista.length-1?()=>setSelectedIdx(i=>i+1):null}
-        onToggle={()=>{ (isLegais?onToggleLegal:onToggle)(selected.id); }}
-        onUpdate={(id,campos)=>{ (isLegais?onUpdateLegal:onUpdate)(id,campos); }}
-        onEditFull={()=>{ onEdit({...selected,_legais:isLegais}); setSelectedIdx(null); }}
+        onClose={()=>setSelected(null)}
+        onToggle={()=>{ (isLegais?onToggleLegal:onToggle)(selected.id); setSelected(s=>s?{...s,status:s.status==="comprado"?"pendente":"comprado",qtdComprada:s.status==="comprado"?0:(parseInt(s.qtdComprada)||1)}:s); }}
+        onUpdate={(id,campos)=>{ (isLegais?onUpdateLegal:onUpdate)(id,campos); setSelected(s=>s?{...s,...campos}:s); }}
+        onEditFull={()=>{ onEdit({...selected,_legais:isLegais}); setSelected(null); }}
       />}
     </div>
   );
 }
 
-function GaleriaDetailModal({p,settings,isLegais,onClose,onPrev,onNext,onToggle,onUpdate,onEditFull}) {
+function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEditFull}) {
   const [link,setLink]=useState(p.link||"");
   const [fullscreen,setFullscreen]=useState(false);
-  useEffect(()=>{ setLink(p.link||""); },[p.id]);
   const isComprado=p.status==="comprado";
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
   const brl=usdComTaxa(p)*settings.dollarPago;
-  const arrowBtnStyle={position:"absolute",top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.4)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:5};
   return (
     <Modal title={p.nome} onClose={onClose}>
-      <div style={{position:"relative",borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220}}>
-        <div style={{width:"100%",height:"100%",cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
-          <ProductImage produto={p} iconSize={48}/>
-        </div>
-        {onPrev&&<button style={{...arrowBtnStyle,left:8}} onClick={e=>{e.stopPropagation();onPrev();}}>‹</button>}
-        {onNext&&<button style={{...arrowBtnStyle,right:8}} onClick={e=>{e.stopPropagation();onNext();}}>›</button>}
+      <div style={{borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220,cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
+        <ProductImage produto={p} iconSize={48}/>
       </div>
 
       {fullscreen&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFullscreen(false)}>
-          <button style={{position:"absolute",top:16,right:16,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:16,cursor:"pointer",zIndex:10}} onClick={()=>setFullscreen(false)}>✕</button>
-          {onPrev&&<button style={{...arrowBtnStyle,left:16,width:44,height:44,fontSize:24,background:"rgba(255,255,255,0.15)"}} onClick={e=>{e.stopPropagation();onPrev();}}>‹</button>}
-          {onNext&&<button style={{...arrowBtnStyle,right:16,width:44,height:44,fontSize:24,background:"rgba(255,255,255,0.15)"}} onClick={e=>{e.stopPropagation();onNext();}}>›</button>}
-          <div style={{width:"92vw",height:"80vh",maxWidth:600}} onClick={e=>e.stopPropagation()}>
+          <button style={{position:"absolute",top:16,right:16,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:16,cursor:"pointer"}} onClick={()=>setFullscreen(false)}>✕</button>
+          <div style={{width:"92vw",height:"80vh",maxWidth:600}}>
             <ProductImage produto={p} iconSize={64} style={{background:"transparent"}} fit="contain"/>
           </div>
         </div>
@@ -3037,7 +2892,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
     <div style={S.page}>
       {/* Sub-tabs */}
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:14}}>
-        {[["compras","🛒 Compras"],["gastos","💸 Gastos"],["checklist","✅ Checklist"],["documentos","📄 Documentos"]].map(([v,l])=>(
+        {[["compras","🛒 Compras"],["gastos","💸 Gastos"],["checklist","✅ Checklist"]].map(([v,l])=>(
           <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:secao===v?C.bgCard:"transparent",color:secao===v?C.primary:C.textMid,boxShadow:secao===v?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.2s"}} onClick={()=>setSecao(v)}>{l}</button>
         ))}
       </div>
@@ -3103,9 +2958,6 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
 
       {/* ── CHECKLIST ── */}
       {secao==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
-
-      {/* ── DOCUMENTOS ── */}
-      {secao==="documentos"&&<DocumentosTab/>}
 
       {/* ── GASTOS ── */}
       {secao==="gastos"&&(
