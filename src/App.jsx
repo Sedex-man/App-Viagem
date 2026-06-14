@@ -1806,7 +1806,7 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
 // ─── CONVERSOR (era CalcTab original) ────────────────────────────────────────
 function ConversorTab({settings}) {
   const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState(""); const [floz,setFloz]=useState("");
-  const dolarAj=calcDolarAjustado(settings); const brlP=(parseFloat(usdN)||0)*settings.dollarPago; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*parseFloat(dc):null;
+  const brlP=(parseFloat(usdN)||0)*settings.dollarPago; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*parseFloat(dc):null;
   return (
     <>
       <div style={S.sectionLabel}>💵 Conversor USD → BRL</div>
@@ -1841,10 +1841,6 @@ function ConversorTab({settings}) {
         ))}
       </div>
       <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
-        {[["Dólar pago",fmtBRL(settings.dollarPago,2)],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",fmtBRL(dolarAj,2)]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
         <BcbRate/>
       </div>
     </>
