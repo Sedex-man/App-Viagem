@@ -83,16 +83,19 @@ const LOJAS_SUGESTOES = [
 const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
 
 // ─── CALC ─────────────────────────────────────────────────────────────────────
+// O dólar médio (settings.dollarPago) já reflete o que foi efetivamente pago,
+// incluindo IOF/spread/taxa de compra — não aplicar essas taxas novamente aqui.
 const calcDolarAjustado = s => s.dollarPago * (1 + (s.iof + s.spread) / 100);
 const calcUsdFinal = (usd, s) => usd * (1 + s.taxa / 100);
-const calcBRL = (usd, s) => calcUsdFinal(usd, s) * calcDolarAjustado(s);
-const calcBRLPago = (usd, s, dp) => calcUsdFinal(usd, s) * dp;
+// Conversão real de preço: dólar médio × valor em USD (sem reaplicar IOF/spread/taxa)
+const calcBRL = (usd, s) => (parseFloat(usd) || 0) * s.dollarPago;
+const calcBRLPago = (usd, s, dp) => (parseFloat(usd) || 0) * dp;
 // Taxa de imposto local (Orlando 6.5%, Kissimmee 7.5%, isento 0%)
 const taxaLocal = p => p.localTaxa === 'orlando' ? 0.065 : p.localTaxa === 'kissimmee' ? 0.075 : 0;
 // USD com imposto local aplicado
 const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
-// BRL total do produto (qtd × usd × taxaLocal × câmbio)
-const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * calcDolarAjustado(s);
+// BRL total do produto (qtd × usd × taxaLocal × dólar médio)
+const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * s.dollarPago;
 // Converte o peso/volume cadastrado para gramas, suportando 3 unidades:
 // 'g' (gramas), 'oz_peso' (onça de massa, 28.3495g), 'oz_liquido' (fluid oz, 29.5735g equiv.)
 // Mantém compatibilidade com itens antigos (tipo "liquido" + campo volume em oz de massa)
@@ -117,7 +120,7 @@ const prodPeso = p => pesoGramas(p) * prodQtdCad(p);
 // USD planeado (usa quantidade cadastrada, independente do status)
 const prodUSDPlanejado = p => (parseFloat(p.usd) || 0) * prodQtdCad(p);
 // BRL planeado (usa quantidade cadastrada, independente do status)
-const calcBRLProdutoPlanejado = (p, s) => usdComTaxa(p) * prodQtdCad(p) * calcDolarAjustado(s);
+const calcBRLProdutoPlanejado = (p, s) => usdComTaxa(p) * prodQtdCad(p) * s.dollarPago;
 
 // ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
 // Formata número com vírgula como separador decimal (padrão pt-BR)
@@ -143,8 +146,8 @@ function calcMinhaParteUSD(gasto, produtosArr) {
 }
 function usdToBRL(usd, gasto, settings) {
   // Se o gasto tem cotação específica registrada, usar ela (já inclui o custo real pago)
-  // Se não, usar o dólar ajustado com IOF+spread para refletir o custo real
-  const cotacao = parseFloat(gasto.dolarPago) || calcDolarAjustado(settings);
+  // Se não, usar o dólar médio (já reflete o custo real pago, sem reaplicar IOF+spread)
+  const cotacao = parseFloat(gasto.dolarPago) || settings.dollarPago;
   return usd * cotacao;
 }
 function calcTotalGastosUSD(gastos, produtosArr) {
@@ -1802,8 +1805,8 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
 
 // ─── CONVERSOR (era CalcTab original) ────────────────────────────────────────
 function ConversorTab({settings}) {
-  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState("");
-  const dolarAj=calcDolarAjustado(settings); const brlP=parseFloat(usdN)*(1+settings.taxa/100)*dolarAj; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*(1+settings.taxa/100)*parseFloat(dc):null;
+  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState(""); const [floz,setFloz]=useState("");
+  const dolarAj=calcDolarAjustado(settings); const brlP=(parseFloat(usdN)||0)*settings.dollarPago; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*parseFloat(dc):null;
   return (
     <>
       <div style={S.sectionLabel}>💵 Conversor USD → BRL</div>
@@ -1828,6 +1831,12 @@ function ConversorTab({settings}) {
         <label style={S.label}>Onças (oz)</label>
         <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
         {oz&&[["Gramas",`${fmtN(parseFloat(oz)*28.3495,1)}g`],["Kg",`${fmtN(parseFloat(oz)*28.3495/1000,3)}kg`],["Libras",`${fmtN(parseFloat(oz)/16,3)} lbs`]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+        <div style={{height:12}}/>
+        <label style={S.label}>Fl Oz (onça fluida)</label>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 8" value={floz} onChange={e=>setFloz(e.target.value)}/>
+        {floz&&[["Mililitros",`${fmtN(parseFloat(floz)*29.5735,1)}ml`],["Litros",`${fmtN(parseFloat(floz)*29.5735/1000,3)}L`],["Gramas (equiv.)",`${fmtN(parseFloat(floz)*29.5735,1)}g`],["Kg (equiv.)",`${fmtN(parseFloat(floz)*29.5735/1000,3)}kg`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
       </div>
@@ -1861,7 +1870,7 @@ function SimuladorTab({settings, gastos, parcelas, produtos}) {
     const vp=mp>0&&qt>0 ? mp/qt : (parseFloat(p.valorParcela)||0);
     return a+restante*vp;
   },0);
-  const usdGastosEmBRL = totalGastosUSD * calcDolarAjustado(settings);
+  const usdGastosEmBRL = totalGastosUSD * settings.dollarPago;
   const totalViagem = usdGastosEmBRL + totalParcelasRestBRL;
 
   return (
@@ -1874,7 +1883,7 @@ function SimuladorTab({settings, gastos, parcelas, produtos}) {
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Composição do custo</div>
         {[
-          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(calcDolarAjustado(settings),2)} (c/ IOF+spread)`},
+          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(settings.dollarPago,2)} (dólar médio)`},
           {label:"💳 Parcelas restantes (BRL)",value:fmtBRL(totalParcelasRestBRL),color:C.purple,sub:`${parcelas.filter(p=>(p.statusMensal||[]).some(s=>!s)).length} itens com parcelas a pagar`},
           {label:"📊 Total comprometido",value:fmtBRL(totalViagem),color:C.text,sub:""},
         ].map(({label,value,color,sub})=>(
@@ -2599,7 +2608,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
-  const brl=usdUnit*calcDolarAjustado(settings);
+  const brl=usdComTaxa(p)*settings.dollarPago;
   const brlPago=p.dollarPago?calcBRLPago(usdUnit,settings,p.dollarPago):null;
   const peso=prodPeso(p);
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
@@ -2681,7 +2690,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
               })}
             </div>
             {(p.localTaxa==="orlando"||p.localTaxa==="kissimmee")&&<div style={{fontSize:11,color:C.textMid,marginTop:6,fontFamily:"'DM Mono',monospace"}}>
-              US$ {fmtN(usdComTaxa(p),2)} c/ imposto · {fmtBRL(usdComTaxa(p)*prodQtd(p)*calcDolarAjustado(settings))} total
+              US$ {fmtN(usdComTaxa(p),2)} c/ imposto · {fmtBRL(usdComTaxa(p)*prodQtdCad(p)*settings.dollarPago)} total
             </div>}
           </div>}
           {/* Controle de quantidade comprada */}
@@ -2758,7 +2767,7 @@ function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEdi
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
-  const brl=usdUnit*calcDolarAjustado(settings);
+  const brl=usdComTaxa(p)*settings.dollarPago;
   return (
     <Modal title={p.nome} onClose={onClose}>
       <div style={{borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220,cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
