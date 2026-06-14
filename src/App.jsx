@@ -538,7 +538,7 @@ DOLLAR TREE:
       setPlanejamento(cloudState.planejamento || { dataInicio:"", dataFim:"", eventos:[] });
       setChecklist(cloudState.checklist || []);
       setComprasDolar(cloudState.comprasDolar || []);
-      setAnotacoes(cloudState.anotacoes || 'WALMART:\n\nMais afastado: 3101 W Princeton St, Orlando, FL 32808, EUA\n\nCom itens da Disney: 8990 Turkey Lake Rd, Orlando FL 32819, EUA\n\nTARGET:\n\n4750 Millenia Plaza Way, Orlando, FL 32839, EUA\n\nTJ MAXX:\n\n5748 Hamlin Groves Trail, Winter Garden, FL 34787, EUA\n\nDOLLAR TREE:\n\n13605 S Apopka Vineland Rd Ste 103A, Orlando, FL 32821');
+      setAnotacoes(cloudState.anotacoes || 'Casa:\n\n5015 Tideview Circle, Orlando, Flórida 32819, Estados Unidos\n\nWALMART:\n\nMais afastado: 3101 W Princeton St, Orlando, FL 32808, EUA\n\nCom itens da Disney: 8990 Turkey Lake Rd, Orlando FL 32819, EUA\n\nTARGET:\n\n4750 Millenia Plaza Way, Orlando, FL 32839, EUA\n\nTJ MAXX:\n\n5748 Hamlin Groves Trail, Winter Garden, FL 34787, EUA\n\nDOLLAR TREE:\n\n13605 S Apopka Vineland Rd Ste 103A, Orlando, FL 32821');
       setCloudReady(true);
     }, (error) => {
       console.error("Erro ao sincronizar com Firestore:", error);
