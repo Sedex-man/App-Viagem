@@ -841,25 +841,44 @@ DOLLAR TREE:
 
   const stats = useMemo(()=>{
     const comprados=produtos.filter(p=>p.status==="comprado");
-    const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
-    const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSDPlanejado(p),0);
-    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProdutoPlanejado(p,settings),0);
-    const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
+    const pesoTotal=produtos.reduce((a,p)=>a+(prodPeso(p)||0),0);
+    const valorTotalUSD=produtos.reduce((a,p)=>a+(prodUSDPlanejado(p)||0),0);
+    const valorTotalBRL=produtos.reduce((a,p)=>a+(calcBRLProdutoPlanejado(p,settings)||0),0);
+    const valorGasto=comprados.reduce((a,p)=>{
+      const v=p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings);
+      return a+(isNaN(v)?0:v);
+    },0);
     let totalMeusGastosUSD=0;
-    gastos.forEach(g=>{
+    if(Array.isArray(gastos)) gastos.forEach(g=>{
       // Fallback para produto pai se usd=0 (gastos legados criados com bug)
       const pai=g.produtoId?produtos.find(p=>p.id===g.produtoId):null;
       const uUnit=(parseFloat(g.usd)||0)||(parseFloat(pai?.usd)||0);
-      const qtd=g.tipo==="produto"?(parseInt(g.qtdComprada)||1):1;
+      let qtd=1;
+      if(g.tipo==="produto"){
+        qtd=parseInt(g.qtdComprada);
+        if(isNaN(qtd)||qtd<=0) qtd=1;
+      }
       const taxa=g.localTaxa==="orlando"?0.065:g.localTaxa==="kissimmee"?0.075:0;
+      let subtotal;
       if(g.divisao&&g.divisao.length>0){
         const soma=g.divisao.reduce((a,p)=>a+(parseFloat(p.valor)||0),0);
-        totalMeusGastosUSD+=Math.max(0,uUnit*(1+taxa)*qtd-soma);
+        subtotal=Math.max(0,uUnit*(1+taxa)*qtd-soma);
       } else {
-        totalMeusGastosUSD+=uUnit*(1+taxa)*qtd;
+        subtotal=uUnit*(1+taxa)*qtd;
       }
+      totalMeusGastosUSD+=isNaN(subtotal)?0:subtotal;
     });
-    return {total:produtos.length,comprados:comprados.length,pendentes:produtos.length-comprados.length,pesoTotal,valorTotalUSD,valorTotalBRL,valorGasto,lojas:new Set(produtos.map(p=>p.loja)).size,totalMeusGastosUSD};
+    return {
+      total:produtos.length,
+      comprados:comprados.length,
+      pendentes:produtos.length-comprados.length,
+      pesoTotal:isNaN(pesoTotal)?0:pesoTotal,
+      valorTotalUSD:isNaN(valorTotalUSD)?0:valorTotalUSD,
+      valorTotalBRL:isNaN(valorTotalBRL)?0:valorTotalBRL,
+      valorGasto:isNaN(valorGasto)?0:valorGasto,
+      lojas:new Set(produtos.map(p=>p.loja||"Não especificada")).size,
+      totalMeusGastosUSD:isNaN(totalMeusGastosUSD)?0:totalMeusGastosUSD
+    };
   },[produtos,settings,gastos]);
 
   const pesoPercent=Math.min(100,(stats.pesoTotal/settings.pesoMax)*100);
