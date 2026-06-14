@@ -13,7 +13,7 @@ const auth = getAuth();
 
 const normalizeCloudState = data => ({
   settings: data?.settings || INITIAL_SETTINGS,
-  produtos: Array.isArray(data?.produtos) ? data.produtos : SAMPLE_PRODUTOS,
+  produtos: Array.isArray(data?.produtos) ? data.produtos : [],
   itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
   gastos: Array.isArray(data?.gastos) ? data.gastos : [],
   parcelas: Array.isArray(data?.parcelas) ? data.parcelas : [],
@@ -23,11 +23,22 @@ const normalizeCloudState = data => ({
   comprasDolar: Array.isArray(data?.comprasDolar) ? data.comprasDolar : [],
 });
 
-async function saveCloudState(userDocRef, state) {
-  await setDoc(userDocRef, {
-    ...state,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+async function saveCloudState(userDocRef, state, { force=false } = {}) {
+  try {
+    // TRAVA DE SEGURANÇA: se a lista de produtos estiver vazia, cancela o salvamento
+    // para não sobrescrever dados reais com um estado vazio (ex: carregamento ainda em curso).
+    // `force` é usado apenas na inicialização de um usuário novo (documento ainda não existe).
+    if (!force && (!state.produtos || state.produtos.length === 0)) {
+      console.warn("⚠️ [Segurança] Tentativa de salvar lista de produtos vazia abortada. Nuvem protegida.");
+      return;
+    }
+    await setDoc(userDocRef, {
+      ...state,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    console.error("Erro ao salvar dados na nuvem:", error);
+  }
 }
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
@@ -467,7 +478,7 @@ DOLLAR TREE:
           planejamento: { dataInicio:"", dataFim:"", eventos:[] },
           checklist: [],
           comprasDolar: [],
-        });
+        }, { force: true });
         setSettings(INITIAL_SETTINGS);
         setProdutos(SAMPLE_PRODUTOS);
         setItensLegais([]);
@@ -702,6 +713,132 @@ DOLLAR TREE:
     setShowSettings(false);
   }
 
+  function exportarParaExcel() {
+    const workbook = XLSX.utils.book_new();
+    let possuiDados = false;
+
+    // 1. COMPRAS
+    if (produtos && produtos.length > 0) {
+      const dados = produtos.map(p => ({
+        "Nome": p.nome || "",
+        "Loja": p.loja || "",
+        "Preço USD": p.usd || 0,
+        "Quantidade Planejada": p.quantidade || 1,
+        "Categoria": p.categoria || "",
+        "Prioridade": p.prioridade || "",
+        "Peso Gramas": p.pesoGramas || 0,
+        "Status": p.status || "pendente",
+        "Local Taxa": p.localTaxa || "isento",
+        "Qtd Comprada": p.qtdComprada || 0,
+        "Link/Ref": p.link || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Compras");
+      possuiDados = true;
+    }
+
+    // 2. LEGAIS
+    if (itensLegais && itensLegais.length > 0) {
+      const dados = itensLegais.map(p => ({
+        "Nome": p.nome || "",
+        "Loja": p.loja || "",
+        "Preço USD": p.usd || 0,
+        "Quantidade Planejada": p.quantidade || 1,
+        "Peso Gramas": p.pesoGramas || 0,
+        "Status": p.status || "pendente",
+        "Local Taxa": p.localTaxa || "isento",
+        "Qtd Comprada": p.qtdComprada || 0,
+        "Link/Ref": p.link || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Legais");
+      possuiDados = true;
+    }
+
+    // 3. GASTOS REAIS
+    if (gastos && gastos.length > 0) {
+      const dados = gastos.map(g => ({
+        "Descrição": g.descricao || "",
+        "Loja": g.loja || "",
+        "Valor USD": g.usd || 0,
+        "Qtd Comprada": g.qtdComprada || 1,
+        "Taxa Local": g.localTaxa || "isento",
+        "Categoria": g.categoria || "",
+        "Data": g.data || "",
+        "Tipo Registro": g.tipo || "avulso"
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Gastos Reais");
+      possuiDados = true;
+    }
+
+    // 4. PARCELAS
+    if (parcelas && parcelas.length > 0) {
+      const dados = parcelas.map(p => ({
+        "Descrição": p.descricao || "",
+        "Valor Total BRL": p.valorTotal || 0,
+        "Qtd Parcelas": p.quantidadeParcelas || 1,
+        "Valor Parcela": p.valorParcela || 0,
+        "Minha Parte": p.minhaParte || "",
+        "Primeira Fatura": p.primeiraFatura || "",
+        "Cartão": p.cartao || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Parcelas");
+      possuiDados = true;
+    }
+
+    // 5. CHECKLIST
+    if (checklist && checklist.length > 0) {
+      const dados = checklist.map(c => ({
+        "Tarefa/Item": c.texto || "",
+        "Concluído": c.feito ? "Sim" : "Não",
+        "Categoria": c.cat || "Geral"
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Checklist");
+      possuiDados = true;
+    }
+
+    // 6. CÂMBIO E DÓLAR
+    if (comprasDolar && comprasDolar.length > 0) {
+      const dados = comprasDolar.map(d => ({
+        "Data da Compra": d.data || "",
+        "Valor USD": d.quantidade || 0,
+        "Cotação Paga (BRL)": d.cotacao || 0,
+        "Observação": d.obs || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Câmbio e Dólar");
+      possuiDados = true;
+    }
+
+    // 7. RESUMO E NOTAS
+    const infoGeral = [];
+    if (anotacoes && anotacoes.trim() !== "") {
+      infoGeral.push({ "Bloco de Informação": "Minhas Anotações de Viagem", "Conteúdo / Detalhes": anotacoes });
+    }
+    if (planejamento) {
+      infoGeral.push({ "Bloco de Informação": "Data de Início da Viagem", "Conteúdo / Detalhes": planejamento.dataInicio || "Não informada" });
+      infoGeral.push({ "Bloco de Informação": "Data de Término da Viagem", "Conteúdo / Detalhes": planejamento.dataFim || "Não informada" });
+      if (planejamento.eventos && planejamento.eventos.length > 0) {
+        infoGeral.push({ "Bloco de Informação": "Total de Eventos no Roteiro", "Conteúdo / Detalhes": `${planejamento.eventos.length} evento(s) cadastrado(s)` });
+      }
+    }
+    if (settings) {
+      infoGeral.push({ "Bloco de Informação": "Dólar Pago (R$)", "Conteúdo / Detalhes": settings.dollarPago || 0 });
+      infoGeral.push({ "Bloco de Informação": "Total de Dólares da Viagem (US$)", "Conteúdo / Detalhes": settings.totalDolarViagem || 0 });
+    }
+    if (infoGeral.length > 0) {
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(infoGeral), "Resumo e Notas");
+      possuiDados = true;
+    }
+
+    if (!possuiDados) {
+      notify("Não há dados cadastrados para exportar.","error");
+      return;
+    }
+
+    const dataHoje = new Date().toLocaleDateString('pt-BR').replace(/\//g,'-');
+    XLSX.writeFile(workbook, `Backup_Completo_TravelShop_${dataHoje}.xlsx`);
+    notify("Planilha exportada!");
+  }
+
+
   const stats = useMemo(()=>{
     const comprados=produtos.filter(p=>p.status==="comprado");
     const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
@@ -788,7 +925,7 @@ DOLLAR TREE:
       {tab===1&&<button style={S.fab} onClick={()=>{setEditProd({_legais:prodSubTab==="legais"});setShowForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
       {tab===3&&<button style={S.fab} onClick={()=>{setEditGasto(null);setShowGastoForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
 
-      {showSettings&&<SettingsModal settings={settings} onSave={s=>{setSettings(s);notify("Configurações salvas!");}} onImport={handleImport} onClose={()=>setShowSettings(false)}/>}
+      {showSettings&&<SettingsModal settings={settings} onSave={s=>{setSettings(s);notify("Configurações salvas!");}} onImport={handleImport} onExport={exportarParaExcel} onClose={()=>setShowSettings(false)}/>}
       {showForm&&<ProdutoForm prod={editProd} onSave={saveProd} onClose={()=>{setShowForm(false);setEditProd(null);}}/>}
       {showGastoForm&&<GastoForm gasto={editGasto} settings={settings} onSave={saveGasto} onClose={()=>{setShowGastoForm(false);setEditGasto(null);}}/>}
     </div>
@@ -2851,7 +2988,7 @@ function BcbRate() {
 
 
 // ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
-function SettingsModal({settings,onSave,onImport,onClose}) {
+function SettingsModal({settings,onSave,onImport,onExport,onClose}) {
   const [s,setS]=useState({...settings});
   const [tab,setTab]=useState("config");
   const [preview,setPreview]=useState(null);
@@ -2907,6 +3044,12 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
       )}
       {tab==="import"&&(
         <>
+          <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>📊 Backup</div>
+            <div style={{fontSize:12,color:C.textMid,marginBottom:10}}>Exporte seus dados atuais para uma planilha Excel.</div>
+            <button style={S.btnPrimary} onClick={onExport}>📥 Exportar planilha atual</button>
+          </div>
+          <div style={{borderTop:`1px dashed ${C.border}`,margin:"4px 0 14px"}}></div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
           <div style={{border:`2px dashed ${loading?C.primary:C.border}`,borderRadius:16,textAlign:"center",padding:"28px 20px",cursor:"pointer",background:loading?C.primaryLight:C.bg}} onClick={()=>fileRef.current.click()} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();processFile(e.dataTransfer.files[0]);}}>
             <div style={{fontSize:36,marginBottom:10}}>{loading?"⏳":"📊"}</div>
