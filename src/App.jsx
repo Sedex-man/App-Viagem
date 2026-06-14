@@ -1175,7 +1175,7 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
           <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
         ))}
       </div>
-      {subTab==="totais"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]}/>}
+      {subTab==="totais"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]} produtos={produtos||[]}/>}
       {subTab==="gastos"&&<>
       {/* Resumo topo */}
       <div style={S.heroCard}>
@@ -1756,7 +1756,7 @@ function ConversorTab({settings}) {
 }
 
 // ─── SIMULADOR ───────────────────────────────────────────────────────────────
-function SimuladorTab({settings, gastos, parcelas}) {
+function SimuladorTab({settings, gastos, parcelas, produtos}) {
   const totalGastosUSD = calcTotalGastosUSD(gastos, produtos||[]);
   const totalParcelasMensal = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte||p.valorParcela)||0)/parseInt(p.quantidadeParcelas||1),0);
   const totalParcelasBRL = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0),0);
