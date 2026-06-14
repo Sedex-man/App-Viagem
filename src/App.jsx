@@ -2197,6 +2197,7 @@ function DocumentosTab({uid}) {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState({texto:"", file:null});
   const [viewer, setViewer] = useState(null); // {fileName, mimeType, data, texto}
+  const [downloadHint, setDownloadHint] = useState(false);
   const fileRef = useRef(null);
 
   useEffect(() => {
@@ -2252,10 +2253,36 @@ function DocumentosTab({uid}) {
     if (!data) {
       try { data = await obterArquivo(uid, item); } catch (e) { return alert("Não foi possível baixar offline."); }
     }
-    const a = document.createElement("a");
-    a.href = data;
-    a.download = item.fileName || "documento";
-    a.click();
+    try {
+      // Converte data URL (base64) em Blob para um download mais confiável no mobile
+      const [, meta, base64] = data.match(/^data:(.*?);base64,(.*)$/) || [];
+      const byteChars = atob(base64);
+      const byteArrays = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteArrays[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([byteArrays], { type: item.mimeType || meta || "application/octet-stream" });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = item.fileName || "documento";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // No mobile, abrir em nova aba garante acesso ao arquivo mesmo se o
+      // navegador não disparar o diálogo de "Salvar" automaticamente.
+      setTimeout(() => {
+        window.open(blobUrl, "_blank");
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      }, 150);
+
+      setDownloadHint(true);
+      setTimeout(()=>setDownloadHint(false), 6000);
+    } catch (e) {
+      console.error("Erro ao baixar:", e);
+      // Fallback: abre direto a data URL
+      window.open(data, "_blank");
+    }
   }
 
   return (
@@ -2263,6 +2290,12 @@ function DocumentosTab({uid}) {
       <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
         <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos (sem servidor de arquivos extra). Uma cópia também fica salva no aparelho para abrir offline. Limite ~2,5MB por arquivo (imagens são comprimidas automaticamente se necessário).</div>
       </div>
+
+      {downloadHint&&(
+        <div style={{...S.card,background:C.successLight,border:`1px solid ${C.success}33`,padding:"10px 14px",marginBottom:12}}>
+          <div style={{fontSize:12,color:C.success,fontWeight:600}}>⬇ Download iniciado! Se não aparecer na pasta Downloads, o arquivo abrirá em outra aba — toque em "⋮" (menu) e escolha "Salvar" ou "Compartilhar".</div>
+        </div>
+      )}
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
         {showForm?"Cancelar":"＋ Adicionar documento"}
