@@ -2220,7 +2220,7 @@ function DocumentosTab({uid}) {
       setShowForm(false);
     } catch (e) {
       console.error("Erro ao salvar documento:", e);
-      alert("Erro ao salvar documento. Verifique sua conexão.");
+      alert(e.message?.includes("muito grande") ? e.message : "Erro ao salvar documento. Verifique sua conexão.");
     } finally {
       setSaving(false);
     }
@@ -2237,9 +2237,9 @@ function DocumentosTab({uid}) {
   }
 
   async function abrir(item) {
-    if (!item.url) { setViewer({...item, data: null}); return; }
+    if (!item.numChunks) { setViewer({...item, data: null}); return; }
     try {
-      const data = await obterArquivo(item);
+      const data = await obterArquivo(uid, item);
       setViewer({...item, data});
     } catch (e) {
       console.error("Erro ao abrir documento:", e);
@@ -2250,7 +2250,7 @@ function DocumentosTab({uid}) {
   async function baixar(item) {
     let data = item.data;
     if (!data) {
-      try { data = await obterArquivo(item); } catch (e) { return alert("Não foi possível baixar offline."); }
+      try { data = await obterArquivo(uid, item); } catch (e) { return alert("Não foi possível baixar offline."); }
     }
     const a = document.createElement("a");
     a.href = data;
@@ -2261,7 +2261,7 @@ function DocumentosTab({uid}) {
   return (
     <>
       <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos. Uma cópia também fica salva no aparelho para abrir offline.</div>
+        <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos (sem servidor de arquivos extra). Uma cópia também fica salva no aparelho para abrir offline. Limite ~1,5MB por arquivo (imagens são comprimidas automaticamente se necessário).</div>
       </div>
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
@@ -2290,8 +2290,8 @@ function DocumentosTab({uid}) {
               {item.texto&&<div style={{fontSize:12,color:C.textMid,marginTop:item.fileName?2:0,whiteSpace:"pre-wrap"}}>{item.texto}</div>}
               <div style={{fontSize:11,color:C.textLight,marginTop:4}}>{new Date(item.criadoEm).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</div>
               <div style={{display:"flex",gap:8,marginTop:8}}>
-                {item.url&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>abrir(item)}>👁 Abrir</button>}
-                {item.url&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>baixar(item)}>⬇ Baixar</button>}
+                {item.numChunks&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>abrir(item)}>👁 Abrir</button>}
+                {item.numChunks&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>baixar(item)}>⬇ Baixar</button>}
                 <button style={{...S.btnOutline,padding:"6px 12px",fontSize:12,color:C.danger,borderColor:C.danger+"44"}} onClick={()=>remover(item)}>🗑</button>
               </div>
             </div>
