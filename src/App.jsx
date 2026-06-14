@@ -2261,7 +2261,7 @@ function DocumentosTab({uid}) {
   return (
     <>
       <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos (sem servidor de arquivos extra). Uma cópia também fica salva no aparelho para abrir offline. Limite ~1,5MB por arquivo (imagens são comprimidas automaticamente se necessário).</div>
+        <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos (sem servidor de arquivos extra). Uma cópia também fica salva no aparelho para abrir offline. Limite ~2,5MB por arquivo (imagens são comprimidas automaticamente se necessário).</div>
       </div>
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
