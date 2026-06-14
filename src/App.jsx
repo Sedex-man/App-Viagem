@@ -159,7 +159,7 @@ async function fetchCotacao() {
 
 const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
 
-function ProductImage({ produto, style={}, iconSize=44 }) {
+function ProductImage({ produto, style={}, iconSize=44, fit="cover" }) {
   const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)] || null);
   const [loading, setLoading] = useState(!imgUrl);
   const [err, setErr] = useState(false);
@@ -223,7 +223,7 @@ function ProductImage({ produto, style={}, iconSize=44 }) {
       <img
         src={imgUrl}
         alt={produto.nome}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
+        style={{ width: "100%", height: "100%", objectFit: fit }}
         onError={() => setErr(true)}
       />
     </div>
@@ -2494,6 +2494,7 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal
 
 function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEditFull}) {
   const [link,setLink]=useState(p.link||"");
+  const [fullscreen,setFullscreen]=useState(false);
   const isComprado=p.status==="comprado";
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
@@ -2501,9 +2502,18 @@ function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEdi
   const brl=usdUnit*calcDolarAjustado(settings);
   return (
     <Modal title={p.nome} onClose={onClose}>
-      <div style={{borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220}}>
+      <div style={{borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220,cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
         <ProductImage produto={p} iconSize={48}/>
       </div>
+
+      {fullscreen&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFullscreen(false)}>
+          <button style={{position:"absolute",top:16,right:16,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:16,cursor:"pointer"}} onClick={()=>setFullscreen(false)}>✕</button>
+          <div style={{width:"92vw",height:"80vh",maxWidth:600}}>
+            <ProductImage produto={p} iconSize={64} style={{background:"transparent"}} fit="contain"/>
+          </div>
+        </div>
+      )}
 
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
         <div>
