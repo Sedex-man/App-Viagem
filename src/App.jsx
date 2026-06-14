@@ -219,7 +219,7 @@ function ProductImage({ produto, style={}, iconSize=44, fit="cover" }) {
     return () => {
       cancelled = true;
     };
-  }, [produto.id, produto.link, produto.imagem]);
+  }, [produto.id, produto.imagem]);
 
   if (!imgUrl || err) {
     return (
@@ -649,6 +649,8 @@ DOLLAR TREE:
   }
 
   function deleteProd(id,list="produtos") {
+    delete imageCache[String(id)];
+    try { localStorage.removeItem(`img_perm_${id}`); } catch(e) {}
     if(list==="legais") setItensLegais(ps=>ps.filter(p=>p.id!==id));
     else { setProdutos(ps=>ps.filter(p=>p.id!==id)); setGastos(gs=>gs.filter(g=>g.produtoId!==id)); }
     notify("Removido","error");
@@ -656,6 +658,7 @@ DOLLAR TREE:
 
   function saveProd(prod) {
     delete imageCache[String(prod.id)];
+    try { localStorage.removeItem(`img_perm_${prod.id}`); } catch(e) {}
     if(prod._legais){ prod.id?setItensLegais(ps=>ps.map(p=>p.id===prod.id?prod:p)):setItensLegais(ps=>[...ps,{...prod,id:Date.now()}]); }
     else { prod.id?setProdutos(ps=>ps.map(p=>p.id===prod.id?prod:p)):setProdutos(ps=>[...ps,{...prod,id:Date.now()}]); }
     notify(prod.id?"Atualizado!":"Adicionado!"); setShowForm(false); setEditProd(null);
