@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
-import { salvarDocumento, listarDocumentos, obterDocumento, removerDocumento, fileToBase64 } from './docStorage';
+import { salvarDocumento, ouvirDocumentos, obterArquivo, removerDocumento } from './docStorage';
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "firebase/auth";
@@ -983,7 +983,7 @@ DOLLAR TREE:
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
         {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
-        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist}/>}
+        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist} uid={user?.uid}/>}
         {tab===7&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
         {tab===8&&<CalcTab settings={settings} gastos={gastos} produtos={produtos} parcelas={parcelas} comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} checklist={checklist} setChecklist={setChecklist} initialSubTab={calcSubTab} onSubTabChange={setCalcSubTab}/>}
         {tab===9&&<div style={S.page}><button onClick={()=>setTab(0)} style={{...S.btnOutline,marginBottom:14,display:"flex",alignItems:"center",gap:6}}><span>←</span> Voltar</button><BagagemTab produtos={produtos} settings={settings}/></div>}
@@ -2190,56 +2190,70 @@ function docIcon(mimeType) {
   return "📎";
 }
 
-function DocumentosTab() {
+function DocumentosTab({uid}) {
   const [documentos, setDocumentos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [f, setF] = useState({texto:"", file:null});
-  const [viewer, setViewer] = useState(null); // {nome, mimeType, data}
+  const [viewer, setViewer] = useState(null); // {fileName, mimeType, data, texto}
   const fileRef = useRef(null);
 
-  async function carregar() {
-    try {
-      const docs = await listarDocumentos();
-      setDocumentos(docs.sort((a,b)=>(b.criadoEm||0)-(a.criadoEm||0)));
-    } catch (e) {
-      console.error("Erro ao listar documentos:", e);
-    }
-    setLoading(false);
-  }
-
-  useEffect(() => { carregar(); }, []);
+  useEffect(() => {
+    if (!uid) { setLoading(false); return; }
+    setLoading(true);
+    const unsub = ouvirDocumentos(uid, docs => {
+      setDocumentos(docs);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [uid]);
 
   async function salvar() {
     if (!f.file && !f.texto.trim()) return alert("Selecione um arquivo ou escreva um texto.");
-    let dados = { id: Date.now(), texto: f.texto.trim(), criadoEm: Date.now() };
-    if (f.file) {
-      const base64 = await fileToBase64(f.file);
-      dados = { ...dados, fileName: f.file.name, mimeType: f.file.type, data: base64 };
+    if (!navigator.onLine && f.file) return alert("📡 Sem internet. Conecte-se à rede para enviar arquivos.");
+    setSaving(true);
+    try {
+      await salvarDocumento(uid, f);
+      setF({texto:"", file:null});
+      if (fileRef.current) fileRef.current.value = "";
+      setShowForm(false);
+    } catch (e) {
+      console.error("Erro ao salvar documento:", e);
+      alert("Erro ao salvar documento. Verifique sua conexão.");
+    } finally {
+      setSaving(false);
     }
-    await salvarDocumento(dados);
-    setF({texto:"", file:null});
-    if (fileRef.current) fileRef.current.value = "";
-    setShowForm(false);
-    carregar();
   }
 
-  async function remover(id) {
+  async function remover(item) {
     if (!confirm("Remover este documento?")) return;
-    await removerDocumento(id);
-    carregar();
+    try {
+      await removerDocumento(uid, item);
+    } catch (e) {
+      console.error("Erro ao remover documento:", e);
+      alert("Erro ao remover documento.");
+    }
   }
 
   async function abrir(item) {
-    if (!item.data) return;
-    const doc = await obterDocumento(item.id);
-    setViewer(doc);
+    if (!item.url) { setViewer({...item, data: null}); return; }
+    try {
+      const data = await obterArquivo(item);
+      setViewer({...item, data});
+    } catch (e) {
+      console.error("Erro ao abrir documento:", e);
+      alert("Não foi possível abrir o arquivo offline. Conecte-se à internet.");
+    }
   }
 
-  function baixar(item) {
-    if (!item.data) return;
+  async function baixar(item) {
+    let data = item.data;
+    if (!data) {
+      try { data = await obterArquivo(item); } catch (e) { return alert("Não foi possível baixar offline."); }
+    }
     const a = document.createElement("a");
-    a.href = item.data;
+    a.href = data;
     a.download = item.fileName || "documento";
     a.click();
   }
@@ -2247,7 +2261,7 @@ function DocumentosTab() {
   return (
     <>
       <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#0369A1"}}>📦 Os documentos ficam salvos no seu aparelho (offline) e podem ser abertos sem internet.</div>
+        <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos. Uma cópia também fica salva no aparelho para abrir offline.</div>
       </div>
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
@@ -2260,7 +2274,7 @@ function DocumentosTab() {
           <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,image/*" onChange={e=>setF(p=>({...p,file:e.target.files[0]||null}))} style={{...S.input,padding:"8px 10px"}}/>
           <label style={S.label}>Anotação / Descrição</label>
           <textarea style={{...S.input,minHeight:80,resize:"vertical",fontFamily:"'Inter',sans-serif"}} placeholder="Ex: Voucher do hotel, passagem aérea, comprovante..." value={f.texto} onChange={e=>setF(p=>({...p,texto:e.target.value}))}/>
-          <button style={S.btnPrimary} onClick={salvar}>Salvar documento</button>
+          <button style={S.btnPrimary} disabled={saving} onClick={salvar}>{saving?"Enviando...":"Salvar documento"}</button>
         </div>
       )}
 
@@ -2276,9 +2290,9 @@ function DocumentosTab() {
               {item.texto&&<div style={{fontSize:12,color:C.textMid,marginTop:item.fileName?2:0,whiteSpace:"pre-wrap"}}>{item.texto}</div>}
               <div style={{fontSize:11,color:C.textLight,marginTop:4}}>{new Date(item.criadoEm).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</div>
               <div style={{display:"flex",gap:8,marginTop:8}}>
-                {item.data&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>abrir(item)}>👁 Abrir</button>}
-                {item.data&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>baixar(item)}>⬇ Baixar</button>}
-                <button style={{...S.btnOutline,padding:"6px 12px",fontSize:12,color:C.danger,borderColor:C.danger+"44"}} onClick={()=>remover(item.id)}>🗑</button>
+                {item.url&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>abrir(item)}>👁 Abrir</button>}
+                {item.url&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>baixar(item)}>⬇ Baixar</button>}
+                <button style={{...S.btnOutline,padding:"6px 12px",fontSize:12,color:C.danger,borderColor:C.danger+"44"}} onClick={()=>remover(item)}>🗑</button>
               </div>
             </div>
           </div>
@@ -2287,13 +2301,19 @@ function DocumentosTab() {
 
       {viewer&&(
         <Modal title={viewer.fileName||"Documento"} onClose={()=>setViewer(null)}>
-          {viewer.mimeType?.startsWith("image/")&&<img src={viewer.data} alt={viewer.fileName} style={{width:"100%",borderRadius:10}}/>}
-          {viewer.mimeType==="application/pdf"&&<iframe src={viewer.data} title={viewer.fileName} style={{width:"100%",height:"70vh",border:"none",borderRadius:10}}/>}
-          {!viewer.mimeType?.startsWith("image/")&&viewer.mimeType!=="application/pdf"&&(
+          {viewer.data&&viewer.mimeType?.startsWith("image/")&&<img src={viewer.data} alt={viewer.fileName} style={{width:"100%",borderRadius:10}}/>}
+          {viewer.data&&viewer.mimeType==="application/pdf"&&<iframe src={viewer.data} title={viewer.fileName} style={{width:"100%",height:"70vh",border:"none",borderRadius:10}}/>}
+          {viewer.data&&!viewer.mimeType?.startsWith("image/")&&viewer.mimeType!=="application/pdf"&&(
             <div style={{textAlign:"center",padding:"24px 0"}}>
               <div style={{fontSize:40,marginBottom:10}}>{docIcon(viewer.mimeType)}</div>
               <div style={{fontSize:13,color:C.textMid,marginBottom:14}}>Pré-visualização não disponível para este tipo de arquivo.</div>
               <button style={S.btnPrimary} onClick={()=>baixar(viewer)}>⬇ Baixar arquivo</button>
+            </div>
+          )}
+          {!viewer.data&&(
+            <div style={{textAlign:"center",padding:"24px 0"}}>
+              <div style={{fontSize:40,marginBottom:10}}>📡</div>
+              <div style={{fontSize:13,color:C.textMid}}>Não foi possível carregar o arquivo. Conecte-se à internet.</div>
             </div>
           )}
           {viewer.texto&&<div style={{marginTop:12,fontSize:13,color:C.textMid,whiteSpace:"pre-wrap"}}>{viewer.texto}</div>}
@@ -2302,6 +2322,7 @@ function DocumentosTab() {
     </>
   );
 }
+
 
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
 const MESES_LABELS = ["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
@@ -2974,7 +2995,7 @@ function GaleriaDetailModal({p,settings,isLegais,onClose,onPrev,onNext,onToggle,
 }
 
 // ─── STATS TAB ────────────────────────────────────────────────────────────────
-function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
+function StatsTab({produtos,gastos,settings,checklist,setChecklist,uid}) {
   const [secao,setSecao]=useState("compras");
   const barColors=[C.primary,C.purple,C.success,C.warning,C.danger,"#06B6D4","#F97316","#EC4899"];
 
@@ -3105,7 +3126,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
       {secao==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
 
       {/* ── DOCUMENTOS ── */}
-      {secao==="documentos"&&<DocumentosTab/>}
+      {secao==="documentos"&&<DocumentosTab uid={uid}/>}
 
       {/* ── GASTOS ── */}
       {secao==="gastos"&&(
