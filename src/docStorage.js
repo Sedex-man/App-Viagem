@@ -6,7 +6,7 @@ import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs
 // então usamos um teto seguro por chunk e dividimos arquivos grandes em várias
 // "partes" (subdocumentos), remontando ao ler.
 const CHUNK_SIZE = 700_000; // ~700KB de base64 por chunk (margem segura)
-const MAX_FILE_SIZE = 1_572_864; // ~1.5MB de arquivo original (após compressão, se aplicável)
+const MAX_FILE_SIZE = 2_621_440; // ~2.5MB de arquivo original (após compressão, se aplicável)
 
 // ── IndexedDB: cache local dos arquivos para acesso 100% offline ──────────────
 const DB_NAME = "travelshop_docs";
@@ -136,7 +136,7 @@ export async function salvarDocumento(uid, { texto, file }) {
     }
 
     if (tamanhoBase64 > MAX_FILE_SIZE) {
-      throw new Error(`Arquivo muito grande (${(tamanhoBase64/1024).toFixed(0)}KB). Máximo ~1.5MB (imagens são comprimidas automaticamente).`);
+      throw new Error(`Arquivo muito grande (${(tamanhoBase64/1024).toFixed(0)}KB). Máximo ~2.5MB (imagens são comprimidas automaticamente).`);
     }
 
     const numChunks = Math.ceil(base64.length / CHUNK_SIZE);
