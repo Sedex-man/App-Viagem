@@ -574,6 +574,31 @@ DOLLAR TREE:
     }));
   }
 
+  function toggleStatusItemLegal(id) {
+    setItensLegais(ps => ps.map(p => {
+      if (p.id !== id) return p;
+      const newStatus = p.status === "comprado" ? "pendente" : "comprado";
+      const novaQtd = newStatus === "comprado" ? (parseInt(p.qtdComprada) || 1) : 0;
+      if (newStatus === "comprado") {
+        setGastos(gs => {
+          if (gs.some(g => g.produtoId === id)) return gs;
+          return [...gs, {
+            id: `legal_${id}`, produtoId: id, descricao: p.nome, loja: p.loja || "Não especificada",
+            usd: parseFloat(p.usd) || 0,
+            qtdComprada: novaQtd,
+            localTaxa: p.localTaxa || "isento",
+            dolarPago: p.dollarPago || settings.dollarPago,
+            brl: null, imagem: p.imagem || "",
+            categoria: "⚖️ Itens Legais", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
+          }];
+        });
+      } else {
+        setGastos(gs => gs.filter(g => g.produtoId !== id));
+      }
+      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: p.localTaxa || "isento"};
+    }));
+  }
+
   function saveGasto(g) {
     if (g.id) setGastos(gs=>gs.map(x=>x.id===g.id?g:x));
     else setGastos(gs=>[...gs,{...g,id:Date.now()}]);
@@ -626,6 +651,40 @@ DOLLAR TREE:
         setGastos(gs => gs.map(g => g.produtoId === id ? {...g, localTaxa: campos.localTaxa} : g));
       }
       return novosProdutos;
+    });
+  }
+
+  function updateItemLegal(id, campos) {
+    setItensLegais(ps => {
+      const novosItens = ps.map(p => p.id === id ? {...p, ...campos} : p);
+      const item = novosItens.find(p => p.id === id);
+      if (!item) return novosItens;
+
+      if ('qtdComprada' in campos) {
+        const novaQtd = campos.qtdComprada;
+        if (novaQtd === 0) {
+          setGastos(gs => gs.filter(g => g.produtoId !== id));
+        } else {
+          setGastos(gs => {
+            if (!gs.some(g => g.produtoId === id)) {
+              return [...gs, {
+                id: `legal_${id}`, produtoId: id, descricao: item.nome, loja: item.loja,
+                usd: parseFloat(item.usd) || 0,
+                qtdComprada: novaQtd,
+                localTaxa: item.localTaxa || "isento",
+                dolarPago: item.dollarPago || settings.dollarPago,
+                brl: null, imagem: item.imagem || "",
+                categoria: "⚖️ Itens Legais", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
+              }];
+            }
+            return gs.map(g => g.produtoId === id ? {...g, qtdComprada: novaQtd} : g);
+          });
+        }
+      }
+      if ('localTaxa' in campos) {
+        setGastos(gs => gs.map(g => g.produtoId === id ? {...g, localTaxa: campos.localTaxa} : g));
+      }
+      return novosItens;
     });
   }
 
@@ -706,7 +765,7 @@ DOLLAR TREE:
       <div style={S.content}>
         {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} anotacoes={anotacoes} setAnotacoes={setAnotacoes}/>}
         {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onSubTabChange={setProdSubTab} onUpdate={updateProduto}/>}
-        {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
+        {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}} onToggle={toggleStatus} onToggleLegal={toggleStatusItemLegal} onUpdate={updateProduto} onUpdateLegal={updateItemLegal}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
         {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
@@ -2388,9 +2447,11 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
 }
 
 // ─── GALERIA TAB ──────────────────────────────────────────────────────────────
-function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
+function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal,onUpdate,onUpdateLegal}) {
   const [subTab,setSubTab]=useState("compras");
+  const [selected,setSelected]=useState(null);
   const lista=subTab==="legais"?itensLegais:produtos;
+  const isLegais=subTab==="legais";
   return (
     <div style={S.page}>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
@@ -2403,7 +2464,7 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
         {lista.map(p=>(
-          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>onEdit({...p,_legais:subTab==="legais"})} className="galeria-card">
+          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>setSelected(p)} className="galeria-card">
             <div style={{height:120,position:"relative",overflow:"hidden"}}>
               <ProductImage produto={p} iconSize={40}/>
               {p.status==="comprado"&&<div style={{position:"absolute",top:8,right:8,background:C.success,borderRadius:999,padding:"2px 8px",fontSize:10,color:"white",fontWeight:700}}>✓ Comprado</div>}
@@ -2418,7 +2479,78 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
         ))}
       </div>
       {lista.length===0&&<Empty text="Nenhum item ainda"/>}
+      {selected&&<GaleriaDetailModal
+        p={selected}
+        settings={settings}
+        isLegais={isLegais}
+        onClose={()=>setSelected(null)}
+        onToggle={()=>{ (isLegais?onToggleLegal:onToggle)(selected.id); setSelected(s=>s?{...s,status:s.status==="comprado"?"pendente":"comprado",qtdComprada:s.status==="comprado"?0:(parseInt(s.qtdComprada)||1)}:s); }}
+        onUpdate={(id,campos)=>{ (isLegais?onUpdateLegal:onUpdate)(id,campos); setSelected(s=>s?{...s,...campos}:s); }}
+        onEditFull={()=>{ onEdit({...selected,_legais:isLegais}); setSelected(null); }}
+      />}
     </div>
+  );
+}
+
+function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEditFull}) {
+  const [link,setLink]=useState(p.link||"");
+  const isComprado=p.status==="comprado";
+  const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
+  const usdUnit=parseFloat(p.usd)||0;
+  const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
+  const brl=usdUnit*calcDolarAjustado(settings);
+  return (
+    <Modal title={p.nome} onClose={onClose}>
+      <div style={{borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220}}>
+        <ProductImage produto={p} iconSize={48}/>
+      </div>
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
+          <div style={{fontSize:12,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,2)}</div>
+        </div>
+        <button onClick={onToggle} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1.5px solid ${isComprado?C.success:C.border}`,background:isComprado?C.successLight:C.bg,color:isComprado?C.success:C.textMid,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+          <span style={{...S.checkbox,...(isComprado?S.checkboxDone:{}),width:18,height:18}}>{isComprado&&<svg width="10" height="10" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}</span>
+          {isComprado?"Comprado":"Marcar comprado"}
+        </button>
+      </div>
+
+      {/* Quantidade */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`,marginBottom:12}}>
+        <span style={{fontSize:13,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={()=>{const n=Math.max(0,qtdC-1);onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:32,height:32,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+          <span style={{fontSize:17,fontWeight:800,color:qtdC>0?C.success:C.textLight,minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{qtdC}</span>
+          <button onClick={()=>{const n=qtdC+1;onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:32,height:32,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+        </div>
+        {qtdC>0&&<span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdTotal,2)} total</span>}
+      </div>
+
+      {/* Taxa local */}
+      <div style={{marginBottom:14}}>
+        <div style={S.label}>💰 Taxa local</div>
+        <div style={{display:"flex",gap:6}}>
+          {[{v:"isento",l:"Sem taxa",c:"#64748B",bg:C.borderLight},{v:"orlando",l:"Orlando 6,5%",c:C.primary,bg:C.primaryLight},{v:"kissimmee",l:"Kissimmee 7,5%",c:C.purple,bg:C.purpleLight}].map(({v,l,c,bg})=>{
+            const active=(p.localTaxa||"isento")===v;
+            return <button key={v} onClick={()=>onUpdate(p.id,{localTaxa:v})} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1.5px solid ${active?c:C.border}`,background:active?bg:C.bgCard,color:active?c:C.textLight,fontSize:11,fontWeight:700,cursor:"pointer"}}>{l}</button>;
+          })}
+        </div>
+        {(p.localTaxa==="orlando"||p.localTaxa==="kissimmee")&&<div style={{fontSize:12,color:C.textMid,marginTop:6,fontFamily:"'DM Mono',monospace"}}>US$ {fmtN(usdComTaxa(p),2)} c/ imposto</div>}
+      </div>
+
+      {/* Link do produto */}
+      <div style={{marginBottom:14}}>
+        <div style={S.label}>🔗 Link do produto</div>
+        <input style={{...S.input,marginBottom:6}} type="url" placeholder="https://amazon.com/..." value={link} onChange={e=>setLink(e.target.value)} onBlur={()=>onUpdate(p.id,{link})}/>
+        {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{fontSize:13,color:C.primary}}>Abrir link ↗</a>}
+      </div>
+
+      <div style={{display:"flex",gap:8}}>
+        <button style={S.btnOutline} onClick={onEditFull}>✏ Editar tudo</button>
+        <button style={{...S.btnOutline,flex:1}} onClick={onClose}>Fechar</button>
+      </div>
+    </Modal>
   );
 }
 
