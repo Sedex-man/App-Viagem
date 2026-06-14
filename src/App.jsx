@@ -1038,7 +1038,7 @@ function CotacaoBcbCard({settings}) {
           {!loading && rate && (
             <>
               <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>
+                <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,2)}</span>
                 {variacao !== null && (
                   <span style={{fontSize:12,fontWeight:700,color:varPos?C.danger:C.success}}>
                     {varPos?"▲":"▼"} {Math.abs(variacao).toFixed(2)}%
@@ -1054,7 +1054,7 @@ function CotacaoBcbCard({settings}) {
           {comIOF && (
             <div>
               <div style={{fontSize:11,color:C.textMid,marginBottom:2}}>c/ IOF + spread</div>
-              <div style={{fontSize:16,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(comIOF,4)}</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(comIOF,2)}</div>
               <div style={{fontSize:10,color:C.textLight}}>{settings.iof}% IOF + {settings.spread}% spread</div>
             </div>
           )}
@@ -1066,9 +1066,9 @@ function CotacaoBcbCard({settings}) {
       {rate && (
         <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.success}22`,display:"flex",gap:10}}>
           {[
-            {label:"Mercado",val:fmtBRL(rate,4),color:C.text},
-            {label:"c/ IOF+spread",val:fmtBRL(comIOF,4),color:C.warning},
-            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,4),color:rate<=settings.dollarPago?C.danger:C.success},
+            {label:"Mercado",val:fmtBRL(rate,2),color:C.text},
+            {label:"c/ IOF+spread",val:fmtBRL(comIOF,2),color:C.warning},
+            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,2),color:rate<=settings.dollarPago?C.danger:C.success},
           ].map(({label,val,color})=>(
             <div key={label} style={{flex:1,textAlign:"center",background:"rgba(255,255,255,0.6)",borderRadius:8,padding:"6px 4px"}}>
               <div style={{fontSize:9,color:C.textLight,marginBottom:2,fontWeight:600,textTransform:"uppercase"}}>{label}</div>
@@ -1093,7 +1093,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
       <div style={S.heroCard}>
         <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Total planejado</div>
         <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: {fmtBRL(settings.dollarPago,4)} · Ajustado: {fmtBRL(calcDolarAjustado(settings),4)}</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: {fmtBRL(settings.dollarPago,2)}</div>
         <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
           {[`IOF ${settings.iof}%`,`Spread ${settings.spread}%`,`Taxa ${settings.taxa}%`].map(t=>(
             <span key={t} style={{background:"rgba(255,255,255,0.15)",borderRadius:999,padding:"3px 10px",fontSize:11,color:"rgba(255,255,255,0.9)",fontWeight:500}}>{t}</span>
@@ -1330,7 +1330,7 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago,produtos}) {
             {label:"Total USD",value:`${fmtUSD(totalUSD,2)}`,color:C.primary},
             {label:"Minha parte USD",value:`${fmtUSD(minhaUSD,2)}`,color:C.primary},
             {label:"Minha parte BRL",value:`${fmtBRL(minhaBRL,2)}`,color:C.textMid},
-            {label:"Cotação usada",value:`${fmtBRL(cotUsada,4)}`},
+            {label:"Cotação usada",value:`${fmtBRL(cotUsada,2)}`},
             ...(temDivisao?[{label:"Dividido entre",value:`${totalPessoas} pessoas`}]:[]),
           ].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
@@ -1432,7 +1432,7 @@ function GastoForm({gasto,settings,onSave,onClose}) {
         }));
       }}/>
       <div style={{background:C.primaryLight,border:`1px solid ${C.primary}22`,borderRadius:9,padding:"8px 12px",fontSize:12,color:C.textMid,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>{fmtBRL((parseFloat(f.dolarPago)||settings.dollarPago),4)}</strong></span>
+        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>{fmtBRL((parseFloat(f.dolarPago)||settings.dollarPago),2)}</strong></span>
         <span style={{color:C.textLight,fontSize:11}}>automática das configurações</span>
       </div>
       <label style={S.label}>Data</label>
@@ -1833,7 +1833,7 @@ function ConversorTab({settings}) {
       </div>
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
-        {[["Dólar pago",fmtBRL(settings.dollarPago,4)],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",fmtBRL(dolarAj,4)]].map(([l,v])=>(
+        {[["Dólar pago",fmtBRL(settings.dollarPago,2)],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",fmtBRL(dolarAj,2)]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
         <BcbRate/>
@@ -1874,7 +1874,7 @@ function SimuladorTab({settings, gastos, parcelas, produtos}) {
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Composição do custo</div>
         {[
-          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(calcDolarAjustado(settings),4)} (c/ IOF+spread)`},
+          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(calcDolarAjustado(settings),2)} (c/ IOF+spread)`},
           {label:"💳 Parcelas restantes (BRL)",value:fmtBRL(totalParcelasRestBRL),color:C.purple,sub:`${parcelas.filter(p=>(p.statusMensal||[]).some(s=>!s)).length} itens com parcelas a pagar`},
           {label:"📊 Total comprometido",value:fmtBRL(totalViagem),color:C.text,sub:""},
         ].map(({label,value,color,sub})=>(
@@ -1948,7 +1948,7 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
           <div style={{background:custoMedio>cotacaoComTaxas?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
             <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>{custoMedio>cotacaoComTaxas?"Acima":"Abaixo"} mercado+taxas</div>
             <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{custoMedio>0?`${custoMedio>cotacaoComTaxas?"+":"-"}${fmtBRL(Math.abs(custoMedio-cotacaoComTaxas),4)}`:"—"}</div>
-            {cotacaoBCB&&<div style={{fontSize:9,color:"rgba(255,255,255,0.6)",marginTop:2}}>mercado BCB: {fmtBRL(cotacaoBCB,4)}</div>}
+            {cotacaoBCB&&<div style={{fontSize:9,color:"rgba(255,255,255,0.6)",marginTop:2}}>mercado BCB: {fmtBRL(cotacaoBCB,2)}</div>}
           </div>
         </div>
       </div>
@@ -1996,7 +1996,7 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
               <div style={{fontSize:12,color:C.textLight,marginTop:1}}>{c.data?new Date(c.data+"T12:00:00").toLocaleDateString("pt-BR"):""}{c.obs?` · ${c.obs}`:""}</div>
             </div>
             <div style={{textAlign:"right"}}>
-              <div style={{fontSize:13,fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(parseFloat(c.cotacao),4)}/US$</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(parseFloat(c.cotacao),2)}/US$</div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(c.quantidade*c.cotacao)}</div>
             </div>
             <button onClick={()=>setComprasDolar(ps=>ps.filter(p=>p.id!==c.id))} style={{background:C.dangerLight,border:"none",borderRadius:6,width:24,height:24,cursor:"pointer",color:C.danger,fontSize:12,marginLeft:8,flexShrink:0}}>✕</button>
@@ -3097,7 +3097,7 @@ function BcbRate() {
           {rate&&<div style={{fontSize:11,color:C.textLight}}>atualizado às {lastFetch}</div>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>}
+          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,2)}</span>}
           <button onClick={fetch_} style={{background:C.primaryLight,border:`1px solid ${C.primary}33`,borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:600,color:C.primary,cursor:"pointer"}}>
             {loading?"...":"↻ BCB"}
           </button>
@@ -3144,7 +3144,7 @@ function SettingsModal({settings,onSave,onImport,onExport,onClose}) {
         <>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>💵 Dólar pago</div>
           <label style={S.label}>Quanto você pagou pelo dólar (R$)</label>
-          <input style={S.input} type="number" inputMode="decimal" step="0.0001" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
+          <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
           <div style={{fontSize:11,color:C.textLight,marginTop:-8,marginBottom:14}}>💡 Atualizado automaticamente pelo Custo Médio Ponderado da aba Câmbio/Dólar, se houver compras registradas.</div>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10,marginTop:4}}>📊 Taxas (para cálculo do custo real)</div>
           {[["IOF (%)","iof","0.01"],["Spread (%)","spread","0.01"],["Taxa de compra (%)","taxa","0.1"]].map(([l,f,st])=>(
