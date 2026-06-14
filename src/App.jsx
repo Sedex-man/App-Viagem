@@ -91,7 +91,19 @@ const taxaLocal = p => p.localTaxa === 'orlando' ? 0.065 : p.localTaxa === 'kiss
 const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
 // BRL total do produto (qtd × usd × taxaLocal × câmbio)
 const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * calcDolarAjustado(s);
-const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
+// Converte o peso/volume cadastrado para gramas, suportando 3 unidades:
+// 'g' (gramas), 'oz_peso' (onça de massa, 28.3495g), 'oz_liquido' (fluid oz, 29.5735g equiv.)
+// Mantém compatibilidade com itens antigos (tipo "liquido" + campo volume em oz de massa)
+const pesoGramas = p => {
+  if (p.tipoPeso) {
+    const v = parseFloat(p.peso) || 0;
+    if (p.tipoPeso === 'oz_peso') return v * 28.3495;
+    if (p.tipoPeso === 'oz_liquido') return v * 29.5735;
+    return v; // 'g'
+  }
+  // Fallback para itens antigos sem tipoPeso
+  return p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
+};
 // Quantidade comprada: lê qtdComprada se comprado, senão 0 (para cálculos de gastos)
 const prodQtd = p => p.status === "comprado" ? Math.max(1, parseInt(p.qtdComprada) || 1) : 0;
 // Quantidade cadastrada no produto (para exibição e peso estimado)
@@ -1912,7 +1924,7 @@ function BagagemTab({produtos, settings}) {
   const categorias = [
     {label:"📱 Eletrônicos",lojas:["Apple","Best Buy","Newegg"],cor:C.primary},
     {label:"👗 Roupas",lojas:["Tommy Hilfiger","Calvin Klein","The North Face","Marshalls","Ross","TJ Maxx"],cor:C.purple},
-    {label:"💧 Líquidos",tipo:"liquido",cor:C.success},
+    {label:"💧 Líquidos",tipoPeso:["oz_liquido"],cor:C.success},
     {label:"🛍 Outros",cor:C.warning},
   ];
   const pesoTotal = produtos.filter(p=>p.status==="comprado").reduce((a,p)=>a+prodPeso(p),0);
@@ -1921,7 +1933,7 @@ function BagagemTab({produtos, settings}) {
 
   const porCategoria = categorias.map(cat=>{
     const itens = produtos.filter(p=>p.status==="comprado"&&(
-      cat.tipo ? p.tipo===cat.tipo :
+      cat.tipoPeso ? cat.tipoPeso.includes(p.tipoPeso||"g") :
       cat.lojas ? cat.lojas.includes(p.loja) :
       true
     ));
@@ -2521,6 +2533,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,isLegais,
             <span style={S.tag}>{p.loja}</span>
             {!isLegais&&<span style={{...S.tag,background:pc.bg,color:pc.color,borderColor:pc.color+"33"}}>{p.prioridade}</span>}
             <span style={S.tag}>{(peso/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg</span>
+            {p.peso>0&&<span style={S.tag}>{p.peso} {p.tipoPeso==="oz_peso"?"Peso Oz":p.tipoPeso==="oz_liquido"?"Líquido Oz":"G"}</span>}
             {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ Comprado</span>}
             {p.localTaxa&&p.localTaxa!=="isento"&&<span style={{...S.tag,background:C.purpleLight,color:C.purple,borderColor:C.purple+"33"}}>{p.localTaxa==="orlando"?"ORL 6,5%":"KIS 7,5%"}</span>}
           </div>
@@ -3099,9 +3112,9 @@ function SettingsModal({settings,onSave,onImport,onExport,onClose}) {
 // ─── PRODUTO FORM ─────────────────────────────────────────────────────────────
 function ProdutoForm({prod,onSave,onClose}) {
   const isL=prod?._legais===true;
-  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipo:"solido",volume:"",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",quantidade:1,_legais:isL};
-  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),dollarPago:(prod.dollarPago||"").toString(),quantidade:prod.quantidade||1,_legais:prod._legais||isL}:empty);
-  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,volume:parseFloat(f.volume)||0,dollarPago:f.dollarPago?parseFloat(f.dollarPago):null,quantidade:parseInt(f.quantidade)||1});}
+  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipoPeso:"g",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",quantidade:1,_legais:isL};
+  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),tipoPeso:prod.tipoPeso||"g",dollarPago:(prod.dollarPago||"").toString(),quantidade:prod.quantidade||1,_legais:prod._legais||isL}:empty);
+  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,tipoPeso:f.tipoPeso||"g",dollarPago:f.dollarPago?parseFloat(f.dollarPago):null,quantidade:parseInt(f.quantidade)||1});}
   return (
     <Modal title={prod?.id?"Editar produto":isL?"✨ Item legal":"Novo produto"} onClose={onClose}>
       <label style={S.label}>Nome *</label>
@@ -3117,9 +3130,28 @@ function ProdutoForm({prod,onSave,onClose}) {
       <datalist id="lojas-list">{LOJAS_SUGESTOES.map(l=><option key={l} value={l}/>)}</datalist>
       <label style={S.label}>Preço USD *</label>
       <input style={S.input} type="number" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
-      <label style={S.label}>Tipo</label>
-      <div style={{display:"flex",gap:8,marginBottom:14}}>{[["solido","📦 Sólido"],["liquido","💧 Líquido"]].map(([v,l])=><button key={v} style={{...S.chipSel,flex:1,...(f.tipo===v?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,tipo:v}))}>{l}</button>)}</div>
-      {f.tipo==="solido"?<><label style={S.label}>Peso (gramas)</label><input style={S.input} type="number" placeholder="Ex: 250" value={f.peso} onChange={e=>setF(p=>({...p,peso:e.target.value}))}/>{f.peso&&<div style={{fontSize:12,color:C.textLight,marginTop:-8,marginBottom:12}}>= {((parseFloat(f.peso)||0)/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}</>:<><label style={S.label}>Volume (oz)</label><input style={S.input} type="number" step="0.1" placeholder="Ex: 3.4" value={f.volume} onChange={e=>setF(p=>({...p,volume:e.target.value}))}/>{f.volume&&<div style={{fontSize:12,color:C.textLight,marginTop:-8,marginBottom:12}}>= {((parseFloat(f.volume)||0)*28.3495/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}</>}
+      <div style={{ marginBottom: 14 }}>
+        <label style={S.label}>Peso / Volume</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            style={{ ...S.input, marginBottom: 0, flex: 1 }}
+            type="number"
+            placeholder="0"
+            value={f.peso}
+            onChange={e=>setF(p=>({...p,peso:e.target.value}))}
+          />
+          <select
+            value={f.tipoPeso || "g"}
+            onChange={e=>setF(p=>({...p,tipoPeso:e.target.value}))}
+            style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:9, padding:"0 10px", color:C.text, fontSize:14, outline:"none", fontFamily:"'Inter',sans-serif" }}
+          >
+            <option value="g">Peso G</option>
+            <option value="oz_peso">Peso Oz</option>
+            <option value="oz_liquido">Líquido Oz</option>
+          </select>
+        </div>
+        {f.peso&&<div style={{fontSize:12,color:C.textLight,marginTop:6}}>= {(pesoGramas({peso:f.peso,tipoPeso:f.tipoPeso||"g"})/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}
+      </div>
       {!isL&&(<>
         <label style={S.label}>Prioridade</label>
         <div style={{display:"flex",gap:8,marginBottom:14}}>{PRIORIDADES.map(pr=><button key={pr} style={{...S.chipSel,flex:1,...(f.prioridade===pr?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,prioridade:pr}))}>{pr}</button>)}</div>
