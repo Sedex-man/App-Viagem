@@ -2340,44 +2340,12 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
       </div>}
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtd>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD total (×${qtd})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
+          {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtdC>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD total (×${qtdC})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
               <span style={{fontSize:13,color:C.textMid}}>{label}</span>
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
             </div>
           ))}
-          {(p.quantidade||1)>1&&p.status==="comprado"&&(
-            <div style={{marginTop:8,marginBottom:4}}>
-              <div style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6}}>Quantos foram comprados?</div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.max(0,(p.qtdComprada||p.quantidade)-1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>−</button>
-                <span style={{fontSize:16,fontWeight:700,color:C.primary,minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||p.quantidade}/{p.quantidade}</span>
-                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.min(p.quantidade,(p.qtdComprada||p.quantidade)+1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>＋</button>
-              </div>
-            </div>
-          )}
-          {/* Seletor de taxa local */}
-          {!isLegais&&<div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
-            <div style={{fontSize:11,fontWeight:700,color:C.textLight,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💰 Taxa local</div>
-            <div style={{display:"flex",gap:6}}>
-              {[{v:"isento",l:"Sem taxa",bg:C.borderLight,col:C.textMid,act:C.textMid,actBg:C.bg},{v:"orlando",l:"Orlando 6,5%",bg:C.primaryLight,col:C.primary,act:C.primary,actBg:C.primaryLight},{v:"kissimmee",l:"Kissimmee 7,5%",bg:C.purpleLight,col:C.purple,act:C.purple,actBg:C.purpleLight}].map(({v,l,actBg,act,bg,col})=>{
-                const active=(p.localTaxa||"isento")===v;
-                return <button key={v} onClick={e=>{e.stopPropagation();onUpdate&&onUpdate(p.id,{localTaxa:v});}} style={{flex:1,padding:"6px 4px",borderRadius:8,border:`1.5px solid ${active?act:C.border}`,background:active?actBg:C.bgCard,color:active?act:C.textLight,fontSize:10,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>{l}</button>;
-              })}
-            </div>
-            {(p.localTaxa==="orlando"||p.localTaxa==="kissimmee")&&<div style={{fontSize:11,color:C.textMid,marginTop:6,fontFamily:"'DM Mono',monospace"}}>
-              US$ {fmtN(usdComTaxa(p),2)} c/ imposto · {fmtBRL(usdComTaxa(p)*prodQtd(p)*calcDolarAjustado(settings))} total
-            </div>}
-          </div>}
-          {/* Controle de quantidade comprada */}
-          {!isLegais&&(p.quantidade||1)>1&&<div style={{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
-            <span style={{fontSize:13,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
-            <div style={{display:"flex",alignItems:"center",gap:10}}>
-              <button onClick={e=>{e.stopPropagation();const n=Math.max(0,(p.qtdComprada||0)-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
-              <span style={{fontSize:16,fontWeight:800,color:(p.qtdComprada||0)>0?C.success:C.textLight,minWidth:50,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||0}/{p.quantidade}</span>
-              <button onClick={e=>{e.stopPropagation();const n=Math.min(p.quantidade||1,(p.qtdComprada||0)+1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
-            </div>
-          </div>}
           {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{display:"block",fontSize:13,color:C.primary,marginTop:8}}>🔗 Ver produto</a>}
           <div style={{display:"flex",gap:8,marginTop:10}}>
             <button style={S.btnOutline} onClick={onEdit}>✏ Editar</button>
