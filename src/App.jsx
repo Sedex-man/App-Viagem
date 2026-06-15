@@ -79,7 +79,8 @@ const taxaLocal = p => p.localTaxa === 'orlando' ? 0.065 : p.localTaxa === 'kiss
 // USD com imposto local aplicado
 const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
 // BRL total do produto (qtd × usd × taxaLocal × câmbio)
-const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * calcDolarAjustado(s);
+// calcBRLProduto: para o TOTAL PLANEJADO usa a quantidade cadastrada (prodQtdCad), não a comprada
+const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtdCad(p) * calcDolarAjustado(s);
 const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
 // Quantidade comprada: lê qtdComprada se comprado, senão 0 (para cálculos de gastos)
 const prodQtd = p => p.status === "comprado" ? Math.max(1, parseInt(p.qtdComprada) || 1) : 0;
@@ -649,7 +650,7 @@ DOLLAR TREE:
   const stats = useMemo(()=>{
     const comprados=produtos.filter(p=>p.status==="comprado");
     const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
-    const valorTotalUSD=produtos.reduce((a,p)=>a+prodUSD(p),0);
+    const valorTotalUSD=produtos.reduce((a,p)=>a+(parseFloat(p.usd)||0)*prodQtdCad(p),0);
     const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProduto(p,settings),0);
     const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
     let totalMeusGastosUSD=0;
