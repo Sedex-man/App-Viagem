@@ -1,19 +1,22 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
+import { salvarDocumento, ouvirDocumentos, obterArquivo, removerDocumento } from './docStorage';
 import { db } from "./firebase";
 import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "firebase/auth";
 
 
 // ─── FIREBASE AUTH / FIRESTORE PERSISTENCE ────────────────────────────────
 // Cada usuário logado tem sua própria "caixinha" no Firestore.
 // Os dados ficam em: usuarios_pwa/{uid}
 const auth = getAuth();
+// Mantém o login salvo no aparelho, mesmo após fechar o navegador/app (login offline)
+setPersistence(auth, browserLocalPersistence).catch(err => console.error("Erro ao definir persistência do Auth:", err));
 
 const normalizeCloudState = data => ({
   settings: data?.settings || INITIAL_SETTINGS,
-  produtos: Array.isArray(data?.produtos) ? data.produtos : SAMPLE_PRODUTOS,
+  produtos: Array.isArray(data?.produtos) ? data.produtos : [],
   itensLegais: Array.isArray(data?.itensLegais) ? data.itensLegais : [],
   gastos: Array.isArray(data?.gastos) ? data.gastos : [],
   parcelas: Array.isArray(data?.parcelas) ? data.parcelas : [],
@@ -23,11 +26,22 @@ const normalizeCloudState = data => ({
   comprasDolar: Array.isArray(data?.comprasDolar) ? data.comprasDolar : [],
 });
 
-async function saveCloudState(userDocRef, state) {
-  await setDoc(userDocRef, {
-    ...state,
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+async function saveCloudState(userDocRef, state, { force=false } = {}) {
+  try {
+    // TRAVA DE SEGURANÇA: se a lista de produtos estiver vazia, cancela o salvamento
+    // para não sobrescrever dados reais com um estado vazio (ex: carregamento ainda em curso).
+    // `force` é usado apenas na inicialização de um usuário novo (documento ainda não existe).
+    if (!force && (!state.produtos || state.produtos.length === 0)) {
+      console.warn("⚠️ [Segurança] Tentativa de salvar lista de produtos vazia abortada. Nuvem protegida.");
+      return;
+    }
+    await setDoc(userDocRef, {
+      ...state,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+  } catch (error) {
+    console.error("Erro ao salvar dados na nuvem:", error);
+  }
 }
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
@@ -70,18 +84,32 @@ const LOJAS_SUGESTOES = [
 const CATEGORIAS_GASTO = ["🛍 Compras","🍔 Alimentação","🚗 Transporte","🎢 Passeio","🏨 Hospedagem","💊 Farmácia","🎁 Presente","💳 Outros"];
 
 // ─── CALC ─────────────────────────────────────────────────────────────────────
+// O dólar médio (settings.dollarPago) já reflete o que foi efetivamente pago,
+// incluindo IOF/spread/taxa de compra — não aplicar essas taxas novamente aqui.
 const calcDolarAjustado = s => s.dollarPago * (1 + (s.iof + s.spread) / 100);
 const calcUsdFinal = (usd, s) => usd * (1 + s.taxa / 100);
-const calcBRL = (usd, s) => calcUsdFinal(usd, s) * calcDolarAjustado(s);
-const calcBRLPago = (usd, s, dp) => calcUsdFinal(usd, s) * dp;
+// Conversão real de preço: dólar médio × valor em USD (sem reaplicar IOF/spread/taxa)
+const calcBRL = (usd, s) => (parseFloat(usd) || 0) * s.dollarPago;
+const calcBRLPago = (usd, s, dp) => (parseFloat(usd) || 0) * dp;
 // Taxa de imposto local (Orlando 6.5%, Kissimmee 7.5%, isento 0%)
 const taxaLocal = p => p.localTaxa === 'orlando' ? 0.065 : p.localTaxa === 'kissimmee' ? 0.075 : 0;
 // USD com imposto local aplicado
 const usdComTaxa = p => (parseFloat(p.usd) || 0) * (1 + taxaLocal(p));
-// BRL total do produto (qtd × usd × taxaLocal × câmbio)
-// calcBRLProduto: para o TOTAL PLANEJADO usa a quantidade cadastrada (prodQtdCad), não a comprada
-const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtdCad(p) * calcDolarAjustado(s);
-const pesoGramas = p => p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
+// BRL total do produto (qtd × usd × taxaLocal × dólar médio)
+const calcBRLProduto = (p, s) => usdComTaxa(p) * prodQtd(p) * s.dollarPago;
+// Converte o peso/volume cadastrado para gramas, suportando 3 unidades:
+// 'g' (gramas), 'oz_peso' (onça de massa, 28.3495g), 'oz_liquido' (fluid oz, 29.5735g equiv.)
+// Mantém compatibilidade com itens antigos (tipo "liquido" + campo volume em oz de massa)
+const pesoGramas = p => {
+  if (p.tipoPeso) {
+    const v = parseFloat(p.peso) || 0;
+    if (p.tipoPeso === 'oz_peso') return v * 28.3495;
+    if (p.tipoPeso === 'oz_liquido') return v * 29.5735;
+    return v; // 'g'
+  }
+  // Fallback para itens antigos sem tipoPeso
+  return p.tipo === "liquido" ? (parseFloat(p.volume)||0)*28.3495 : parseFloat(p.peso)||0;
+};
 // Quantidade comprada: lê qtdComprada se comprado, senão 0 (para cálculos de gastos)
 const prodQtd = p => p.status === "comprado" ? Math.max(1, parseInt(p.qtdComprada) || 1) : 0;
 // Quantidade cadastrada no produto (para exibição e peso estimado)
@@ -90,6 +118,10 @@ const prodQtdCad = p => Math.max(1, parseInt(p.quantidade) || 1);
 const prodUSD = p => (parseFloat(p.usd) || 0) * Math.max(1, parseInt(p.qtdComprada) || (p.status === "comprado" ? 1 : 0));
 // Peso total considerando quantidade cadastrada
 const prodPeso = p => pesoGramas(p) * prodQtdCad(p);
+// USD planeado (usa quantidade cadastrada, independente do status)
+const prodUSDPlanejado = p => (parseFloat(p.usd) || 0) * prodQtdCad(p);
+// BRL planeado (usa quantidade cadastrada, independente do status)
+const calcBRLProdutoPlanejado = (p, s) => usdComTaxa(p) * prodQtdCad(p) * s.dollarPago;
 
 // ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
 // Formata número com vírgula como separador decimal (padrão pt-BR)
@@ -115,8 +147,8 @@ function calcMinhaParteUSD(gasto, produtosArr) {
 }
 function usdToBRL(usd, gasto, settings) {
   // Se o gasto tem cotação específica registrada, usar ela (já inclui o custo real pago)
-  // Se não, usar o dólar ajustado com IOF+spread para refletir o custo real
-  const cotacao = parseFloat(gasto.dolarPago) || calcDolarAjustado(settings);
+  // Se não, usar o dólar médio (já reflete o custo real pago, sem reaplicar IOF+spread)
+  const cotacao = parseFloat(gasto.dolarPago) || settings.dollarPago;
   return usd * cotacao;
 }
 function calcTotalGastosUSD(gastos, produtosArr) {
@@ -156,7 +188,7 @@ async function fetchCotacao() {
 
 const LOJA_EMOJI = { Amazon:"📦","Best Buy":"🔵",Walmart:"🟡",Target:"🎯",Newegg:"💻",Apple:"🍎",Costco:"🏪",Basspro:"🎣",HomeGoods:"🏠","Dollar Tree":"🌳",Marshalls:"🏷",Ross:"🏷","TJ Maxx":"🏷","Tommy Hilfiger":"👔","Calvin Klein":"👔","The North Face":"🏔",Sephora:"💄",Ulta:"💄",Restaurante:"🍔",Uber:"🚗",Passeio:"🎢",Outro:"🛒" };
 
-function ProductImage({ produto, style={}, iconSize=44 }) {
+function ProductImage({ produto, style={}, iconSize=44, fit="cover" }) {
   const [imgUrl, setImgUrl] = useState(imageCache[String(produto.id)] || null);
   const [loading, setLoading] = useState(!imgUrl);
   const [err, setErr] = useState(false);
@@ -191,7 +223,7 @@ function ProductImage({ produto, style={}, iconSize=44 }) {
     return () => {
       cancelled = true;
     };
-  }, [produto.id, produto.link, produto.imagem]);
+  }, [produto.id, produto.imagem]);
 
   if (!imgUrl || err) {
     return (
@@ -220,8 +252,16 @@ function ProductImage({ produto, style={}, iconSize=44 }) {
       <img
         src={imgUrl}
         alt={produto.nome}
-        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        onError={() => setErr(true)}
+        loading="lazy"
+        style={{ width: "100%", height: "100%", objectFit: fit }}
+        onError={() => {
+          // Se a cópia offline (blob) falhar, tenta a URL direta cadastrada
+          if (imgUrl !== produto.imagem && produto.imagem) {
+            setImgUrl(produto.imagem);
+          } else {
+            setErr(true);
+          }
+        }}
       />
     </div>
   );
@@ -336,11 +376,16 @@ function LoginScreen() {
 
   async function entrar() {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
+    if (!navigator.onLine) { setErro("📡 Sem internet. Conecte-se à rede para fazer login."); return; }
     setLoading(true); setErro("");
     try {
       await signInWithEmailAndPassword(auth, email.trim(), senha);
     } catch (e) {
-      setErro(traduzErroAuth(e));
+      if (e?.code === "auth/network-request-failed" || e?.message?.includes("network")) {
+        setErro("📡 Falha na rede. Verifique sua conexão para fazer login.");
+      } else {
+        setErro(traduzErroAuth(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -349,11 +394,16 @@ function LoginScreen() {
   async function criarConta() {
     if (!email || !senha) { setErro("Informe e-mail e senha."); return; }
     if (senha.length < 6) { setErro("A senha precisa ter pelo menos 6 caracteres."); return; }
+    if (!navigator.onLine) { setErro("📡 Sem internet. Conecte-se à rede para criar a conta."); return; }
     setLoading(true); setErro("");
     try {
       await createUserWithEmailAndPassword(auth, email.trim(), senha);
     } catch (e) {
-      setErro(traduzErroAuth(e));
+      if (e?.code === "auth/network-request-failed" || e?.message?.includes("network")) {
+        setErro("📡 Falha na rede. Verifique sua conexão para criar a conta.");
+      } else {
+        setErro(traduzErroAuth(e));
+      }
     } finally {
       setLoading(false);
     }
@@ -434,6 +484,7 @@ DOLLAR TREE:
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [cloudReady, setCloudReady] = useState(false);
+  const [syncStatus, setSyncStatus] = useState("idle"); // idle | saving | synced | error
   const skipNextCloudSave = useRef(false);
   const skipNextSnapshot = useRef(false);
   const userDocRef = useMemo(() => user ? doc(db, "usuarios_pwa", user.uid) : null, [user]);
@@ -464,7 +515,7 @@ DOLLAR TREE:
           planejamento: { dataInicio:"", dataFim:"", eventos:[] },
           checklist: [],
           comprasDolar: [],
-        });
+        }, { force: true });
         setSettings(INITIAL_SETTINGS);
         setProdutos(SAMPLE_PRODUTOS);
         setItensLegais([]);
@@ -512,18 +563,35 @@ DOLLAR TREE:
       return;
     }
 
+    setSyncStatus("saving");
     const timer = setTimeout(() => {
       skipNextSnapshot.current = true;
       saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
+        .then(() => setSyncStatus("synced"))
         .catch((error) => {
           console.error("Erro ao salvar no Firestore:", error);
           notify("Erro ao salvar na nuvem", "error");
           skipNextSnapshot.current = false;
+          setSyncStatus("error");
         });
     }, 350);
 
     return () => clearTimeout(timer);
   }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes, cloudReady, userDocRef]);
+
+  // Mantém "Dólar pago" (cotação padrão) sincronizado com o Custo Médio Ponderado
+  // calculado a partir do histórico de compras de dólar (aba Câmbio).
+  useEffect(() => {
+    if (!cloudReady) return;
+    if (!Array.isArray(comprasDolar) || comprasDolar.length === 0) return;
+    const totalUSD = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0),0);
+    const totalBRL = comprasDolar.reduce((a,c)=>a+(parseFloat(c.quantidade)||0)*(parseFloat(c.cotacao)||0),0);
+    if (totalUSD <= 0) return;
+    const custoMedio = Math.round((totalBRL/totalUSD)*10000)/10000;
+    if (custoMedio > 0 && custoMedio !== settings.dollarPago) {
+      setSettings(s => ({...s, dollarPago: custoMedio}));
+    }
+  }, [comprasDolar, cloudReady]);
 
   function notify(msg, type="success") { setNotification({msg,type}); setTimeout(()=>setNotification(null),2800); }
 
@@ -571,6 +639,31 @@ DOLLAR TREE:
     }));
   }
 
+  function toggleStatusItemLegal(id) {
+    setItensLegais(ps => ps.map(p => {
+      if (p.id !== id) return p;
+      const newStatus = p.status === "comprado" ? "pendente" : "comprado";
+      const novaQtd = newStatus === "comprado" ? (parseInt(p.qtdComprada) || 1) : 0;
+      if (newStatus === "comprado") {
+        setGastos(gs => {
+          if (gs.some(g => g.produtoId === id)) return gs;
+          return [...gs, {
+            id: `legal_${id}`, produtoId: id, descricao: p.nome, loja: p.loja || "Não especificada",
+            usd: parseFloat(p.usd) || 0,
+            qtdComprada: novaQtd,
+            localTaxa: p.localTaxa || "isento",
+            dolarPago: p.dollarPago || settings.dollarPago,
+            brl: null, imagem: p.imagem || "",
+            categoria: "⚖️ Itens Legais", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
+          }];
+        });
+      } else {
+        setGastos(gs => gs.filter(g => g.produtoId !== id));
+      }
+      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: p.localTaxa || "isento"};
+    }));
+  }
+
   function saveGasto(g) {
     if (g.id) setGastos(gs=>gs.map(x=>x.id===g.id?g:x));
     else setGastos(gs=>[...gs,{...g,id:Date.now()}]);
@@ -579,6 +672,8 @@ DOLLAR TREE:
   }
 
   function deleteProd(id,list="produtos") {
+    delete imageCache[String(id)];
+    try { localStorage.removeItem(`img_perm_${id}`); } catch(e) {}
     if(list==="legais") setItensLegais(ps=>ps.filter(p=>p.id!==id));
     else { setProdutos(ps=>ps.filter(p=>p.id!==id)); setGastos(gs=>gs.filter(g=>g.produtoId!==id)); }
     notify("Removido","error");
@@ -586,6 +681,7 @@ DOLLAR TREE:
 
   function saveProd(prod) {
     delete imageCache[String(prod.id)];
+    try { localStorage.removeItem(`img_perm_${prod.id}`); } catch(e) {}
     if(prod._legais){ prod.id?setItensLegais(ps=>ps.map(p=>p.id===prod.id?prod:p)):setItensLegais(ps=>[...ps,{...prod,id:Date.now()}]); }
     else { prod.id?setProdutos(ps=>ps.map(p=>p.id===prod.id?prod:p)):setProdutos(ps=>[...ps,{...prod,id:Date.now()}]); }
     notify(prod.id?"Atualizado!":"Adicionado!"); setShowForm(false); setEditProd(null);
@@ -626,16 +722,48 @@ DOLLAR TREE:
     });
   }
 
-  function moveToLegais(item) {
-    setItensLegais(ps=>[...ps,{...item,_legais:true,id:Date.now()}]);
-    setProdutos(ps=>ps.filter(p=>p.id!==item.id));
-    setGastos(gs=>gs.filter(g=>g.produtoId!==item.id));
-    notify("Movido para itens legais!");
+  function updateItemLegal(id, campos) {
+    setItensLegais(ps => {
+      const novosItens = ps.map(p => p.id === id ? {...p, ...campos} : p);
+      const item = novosItens.find(p => p.id === id);
+      if (!item) return novosItens;
+
+      if ('qtdComprada' in campos) {
+        const novaQtd = campos.qtdComprada;
+        if (novaQtd === 0) {
+          setGastos(gs => gs.filter(g => g.produtoId !== id));
+        } else {
+          setGastos(gs => {
+            if (!gs.some(g => g.produtoId === id)) {
+              return [...gs, {
+                id: `legal_${id}`, produtoId: id, descricao: item.nome, loja: item.loja,
+                usd: parseFloat(item.usd) || 0,
+                qtdComprada: novaQtd,
+                localTaxa: item.localTaxa || "isento",
+                dolarPago: item.dollarPago || settings.dollarPago,
+                brl: null, imagem: item.imagem || "",
+                categoria: "⚖️ Itens Legais", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
+              }];
+            }
+            return gs.map(g => g.produtoId === id ? {...g, qtdComprada: novaQtd} : g);
+          });
+        }
+      }
+      if ('localTaxa' in campos) {
+        setGastos(gs => gs.map(g => g.produtoId === id ? {...g, localTaxa: campos.localTaxa} : g));
+      }
+      return novosItens;
+    });
   }
 
   function moveToList(item) {
     setProdutos(ps=>[...ps,{...item,_legais:undefined,status:"pendente",prioridade:"Média",id:Date.now()}]);
     setItensLegais(ps=>ps.filter(p=>p.id!==item.id)); notify("Movido para lista!");
+  }
+
+  function moveToLegais(item) {
+    setItensLegais(ps=>[...ps,{...item,_legais:undefined,status:"pendente",id:Date.now()}]);
+    setProdutos(ps=>ps.filter(p=>p.id!==item.id)); notify("Movido para itens legais!");
   }
 
   function handleImport(compras,legais,parcelasImp=[]) {
@@ -647,30 +775,172 @@ DOLLAR TREE:
     setShowSettings(false);
   }
 
+  function exportarParaExcel() {
+    const workbook = XLSX.utils.book_new();
+    let possuiDados = false;
+
+    // 1. COMPRAS
+    if (produtos && produtos.length > 0) {
+      const dados = produtos.map(p => ({
+        "Nome": p.nome || "",
+        "Loja": p.loja || "",
+        "Preço USD": p.usd || 0,
+        "Quantidade Planejada": p.quantidade || 1,
+        "Categoria": p.categoria || "",
+        "Prioridade": p.prioridade || "",
+        "Peso Gramas": p.pesoGramas || 0,
+        "Status": p.status || "pendente",
+        "Local Taxa": p.localTaxa || "isento",
+        "Qtd Comprada": p.qtdComprada || 0,
+        "Link/Ref": p.link || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Compras");
+      possuiDados = true;
+    }
+
+    // 2. LEGAIS
+    if (itensLegais && itensLegais.length > 0) {
+      const dados = itensLegais.map(p => ({
+        "Nome": p.nome || "",
+        "Loja": p.loja || "",
+        "Preço USD": p.usd || 0,
+        "Quantidade Planejada": p.quantidade || 1,
+        "Peso Gramas": p.pesoGramas || 0,
+        "Status": p.status || "pendente",
+        "Local Taxa": p.localTaxa || "isento",
+        "Qtd Comprada": p.qtdComprada || 0,
+        "Link/Ref": p.link || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Legais");
+      possuiDados = true;
+    }
+
+    // 3. GASTOS REAIS
+    if (gastos && gastos.length > 0) {
+      const dados = gastos.map(g => ({
+        "Descrição": g.descricao || "",
+        "Loja": g.loja || "",
+        "Valor USD": g.usd || 0,
+        "Qtd Comprada": g.qtdComprada || 1,
+        "Taxa Local": g.localTaxa || "isento",
+        "Categoria": g.categoria || "",
+        "Data": g.data || "",
+        "Tipo Registro": g.tipo || "avulso"
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Gastos Reais");
+      possuiDados = true;
+    }
+
+    // 4. PARCELAS
+    if (parcelas && parcelas.length > 0) {
+      const dados = parcelas.map(p => ({
+        "Descrição": p.descricao || "",
+        "Valor Total BRL": p.valorTotal || 0,
+        "Qtd Parcelas": p.quantidadeParcelas || 1,
+        "Valor Parcela": p.valorParcela || 0,
+        "Minha Parte": p.minhaParte || "",
+        "Primeira Fatura": p.primeiraFatura || "",
+        "Cartão": p.cartao || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Parcelas");
+      possuiDados = true;
+    }
+
+    // 5. CHECKLIST
+    if (checklist && checklist.length > 0) {
+      const dados = checklist.map(c => ({
+        "Tarefa/Item": c.texto || "",
+        "Concluído": c.feito ? "Sim" : "Não",
+        "Categoria": c.cat || "Geral"
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Checklist");
+      possuiDados = true;
+    }
+
+    // 6. CÂMBIO E DÓLAR
+    if (comprasDolar && comprasDolar.length > 0) {
+      const dados = comprasDolar.map(d => ({
+        "Data da Compra": d.data || "",
+        "Valor USD": d.quantidade || 0,
+        "Cotação Paga (BRL)": d.cotacao || 0,
+        "Observação": d.obs || ""
+      }));
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(dados), "Câmbio e Dólar");
+      possuiDados = true;
+    }
+
+    // 7. RESUMO E NOTAS
+    const infoGeral = [];
+    if (anotacoes && anotacoes.trim() !== "") {
+      infoGeral.push({ "Bloco de Informação": "Minhas Anotações de Viagem", "Conteúdo / Detalhes": anotacoes });
+    }
+    if (planejamento) {
+      infoGeral.push({ "Bloco de Informação": "Data de Início da Viagem", "Conteúdo / Detalhes": planejamento.dataInicio || "Não informada" });
+      infoGeral.push({ "Bloco de Informação": "Data de Término da Viagem", "Conteúdo / Detalhes": planejamento.dataFim || "Não informada" });
+      if (planejamento.eventos && planejamento.eventos.length > 0) {
+        infoGeral.push({ "Bloco de Informação": "Total de Eventos no Roteiro", "Conteúdo / Detalhes": `${planejamento.eventos.length} evento(s) cadastrado(s)` });
+      }
+    }
+    if (settings) {
+      infoGeral.push({ "Bloco de Informação": "Dólar Pago (R$)", "Conteúdo / Detalhes": settings.dollarPago || 0 });
+      infoGeral.push({ "Bloco de Informação": "Total de Dólares da Viagem (US$)", "Conteúdo / Detalhes": settings.totalDolarViagem || 0 });
+    }
+    if (infoGeral.length > 0) {
+      XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(infoGeral), "Resumo e Notas");
+      possuiDados = true;
+    }
+
+    if (!possuiDados) {
+      notify("Não há dados cadastrados para exportar.","error");
+      return;
+    }
+
+    const dataHoje = new Date().toLocaleDateString('pt-BR').replace(/\//g,'-');
+    XLSX.writeFile(workbook, `Backup_Completo_TravelShop_${dataHoje}.xlsx`);
+    notify("Planilha exportada!");
+  }
+
+
   const stats = useMemo(()=>{
     const comprados=produtos.filter(p=>p.status==="comprado");
-    const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
-    const valorTotalUSD=produtos.reduce((a,p)=>a+(parseFloat(p.usd)||0)*prodQtdCad(p),0);
-    const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProduto(p,settings),0);
+    const pesoTotal=produtos.reduce((a,p)=>a+(prodPeso(p)||0),0);
+    const valorTotalUSD=produtos.reduce((a,p)=>a+(prodUSDPlanejado(p)||0),0);
+    const valorTotalBRL=produtos.reduce((a,p)=>a+(calcBRLProdutoPlanejado(p,settings)||0),0);
     const valorGasto=comprados.reduce((a,p)=>{
-      const usdReal=usdComTaxa(p)*(parseInt(p.qtdComprada)||1);
-      return a+(p.dollarPago?calcBRLPago(usdReal,settings,p.dollarPago):calcBRL(usdReal,settings));
+      const v=p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings);
+      return a+(isNaN(v)?0:v);
     },0);
     let totalMeusGastosUSD=0;
-    gastos.forEach(g=>{
+    if(Array.isArray(gastos)) gastos.forEach(g=>{
       // Fallback para produto pai se usd=0 (gastos legados criados com bug)
       const pai=g.produtoId?produtos.find(p=>p.id===g.produtoId):null;
       const uUnit=(parseFloat(g.usd)||0)||(parseFloat(pai?.usd)||0);
-      const qtd=g.tipo==="produto"?(parseInt(g.qtdComprada)||1):1;
+      let qtd=1;
+      if(g.tipo==="produto"){
+        qtd=parseInt(g.qtdComprada);
+        if(isNaN(qtd)||qtd<=0) qtd=1;
+      }
       const taxa=g.localTaxa==="orlando"?0.065:g.localTaxa==="kissimmee"?0.075:0;
+      let subtotal;
       if(g.divisao&&g.divisao.length>0){
         const soma=g.divisao.reduce((a,p)=>a+(parseFloat(p.valor)||0),0);
-        totalMeusGastosUSD+=Math.max(0,uUnit*(1+taxa)*qtd-soma);
+        subtotal=Math.max(0,uUnit*(1+taxa)*qtd-soma);
       } else {
-        totalMeusGastosUSD+=uUnit*(1+taxa)*qtd;
+        subtotal=uUnit*(1+taxa)*qtd;
       }
+      totalMeusGastosUSD+=isNaN(subtotal)?0:subtotal;
     });
-    return {total:produtos.length,comprados:comprados.length,pendentes:produtos.length-comprados.length,pesoTotal,valorTotalUSD,valorTotalBRL,valorGasto,lojas:new Set(produtos.map(p=>p.loja)).size,totalMeusGastosUSD};
+    return {
+      total:produtos.length,
+      comprados:comprados.length,
+      pendentes:produtos.length-comprados.length,
+      pesoTotal:isNaN(pesoTotal)?0:pesoTotal,
+      valorTotalUSD:isNaN(valorTotalUSD)?0:valorTotalUSD,
+      valorTotalBRL:isNaN(valorTotalBRL)?0:valorTotalBRL,
+      valorGasto:isNaN(valorGasto)?0:valorGasto,
+      lojas:new Set(produtos.map(p=>p.loja||"Não especificada")).size,
+      totalMeusGastosUSD:isNaN(totalMeusGastosUSD)?0:totalMeusGastosUSD
+    };
   },[produtos,settings,gastos]);
 
   const pesoPercent=Math.min(100,(stats.pesoTotal/settings.pesoMax)*100);
@@ -703,6 +973,7 @@ DOLLAR TREE:
           </div>
         </div>
         <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <SyncIndicator status={syncStatus}/>
           <button style={{...S.settingsBtn,width:"auto",padding:"0 10px",fontSize:12,fontWeight:700,color:C.textMid}} onClick={handleLogout}>Sair</button>
           <button style={S.settingsBtn} onClick={()=>setShowSettings(true)}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={C.textMid} strokeWidth="2" strokeLinecap="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -713,11 +984,11 @@ DOLLAR TREE:
       <div style={S.content}>
         {tab===0&&<DashboardTab stats={stats} settings={settings} pesoPercent={pesoPercent} pesoColor={pesoColor} pesoBg={pesoBg} onTabChange={setTab} anotacoes={anotacoes} setAnotacoes={setAnotacoes}/>}
         {tab===1&&<ProdutosTab produtos={produtos} itensLegais={itensLegais} settings={settings} onToggle={toggleStatus} onDelete={deleteProd} onEdit={p=>{setEditProd(p);setShowForm(true);}} onAdd={()=>{setEditProd(null);setShowForm(true);}} onMoveToList={moveToList} onMoveToLegais={moveToLegais} onSubTabChange={setProdSubTab} onUpdate={updateProduto}/>}
-        {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}}/>}
+        {tab===2&&<GaleriaTab produtos={produtos} itensLegais={itensLegais} settings={settings} onEdit={p=>{setEditProd(p);setShowForm(true);}} onToggle={toggleStatus} onToggleLegal={toggleStatusItemLegal} onUpdate={updateProduto} onUpdateLegal={updateItemLegal}/>}
         {tab===3&&<GastosTab gastos={gastos} settings={settings} onAdd={()=>{setEditGasto(null);setShowGastoForm(true);}} onEdit={g=>{setEditGasto(g);setShowGastoForm(true);}} onDelete={id=>{ setGastos(gs=>gs.filter(g=>g.id!==id)); notify("Removido","error"); }} onTogglePago={(gastoId,pessoaIdx)=>setGastos(gs=>gs.map(g=>g.id===gastoId?{...g,divisao:g.divisao.map((p,i)=>i===pessoaIdx?{...p,pago:!p.pago}:p)}:g))} produtos={produtos} onToggleStatus={toggleStatus} parcelas={parcelas}/>}
         {tab===4&&<ParcelasTab parcelas={parcelas} setParcelas={setParcelas}/>}
         {tab===5&&<RoteiroTab planejamento={planejamento} setPlanejamento={setPlanejamento}/>}
-        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist}/>}
+        {tab===6&&<StatsTab produtos={produtos} gastos={gastos} settings={settings} checklist={checklist} setChecklist={setChecklist} uid={user?.uid}/>}
         {tab===7&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
         {tab===8&&<CalcTab settings={settings} gastos={gastos} produtos={produtos} parcelas={parcelas} comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} checklist={checklist} setChecklist={setChecklist} initialSubTab={calcSubTab} onSubTabChange={setCalcSubTab}/>}
         {tab===9&&<div style={S.page}><button onClick={()=>setTab(0)} style={{...S.btnOutline,marginBottom:14,display:"flex",alignItems:"center",gap:6}}><span>←</span> Voltar</button><BagagemTab produtos={produtos} settings={settings}/></div>}
@@ -736,7 +1007,7 @@ DOLLAR TREE:
       {tab===1&&<button style={S.fab} onClick={()=>{setEditProd({_legais:prodSubTab==="legais"});setShowForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
       {tab===3&&<button style={S.fab} onClick={()=>{setEditGasto(null);setShowGastoForm(true);}}><span style={{fontSize:22,color:"white"}}>＋</span></button>}
 
-      {showSettings&&<SettingsModal settings={settings} onSave={s=>{setSettings(s);notify("Configurações salvas!");}} onImport={handleImport} onClose={()=>setShowSettings(false)}/>}
+      {showSettings&&<SettingsModal settings={settings} onSave={s=>{setSettings(s);notify("Configurações salvas!");}} onImport={handleImport} onExport={exportarParaExcel} onClose={()=>setShowSettings(false)}/>}
       {showForm&&<ProdutoForm prod={editProd} onSave={saveProd} onClose={()=>{setShowForm(false);setEditProd(null);}}/>}
       {showGastoForm&&<GastoForm gasto={editGasto} settings={settings} onSave={saveGasto} onClose={()=>{setShowGastoForm(false);setEditGasto(null);}}/>}
     </div>
@@ -776,7 +1047,7 @@ function CotacaoBcbCard({settings}) {
           {!loading && rate && (
             <>
               <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>
+                <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,2)}</span>
                 {variacao !== null && (
                   <span style={{fontSize:12,fontWeight:700,color:varPos?C.danger:C.success}}>
                     {varPos?"▲":"▼"} {Math.abs(variacao).toFixed(2)}%
@@ -792,7 +1063,7 @@ function CotacaoBcbCard({settings}) {
           {comIOF && (
             <div>
               <div style={{fontSize:11,color:C.textMid,marginBottom:2}}>c/ IOF + spread</div>
-              <div style={{fontSize:16,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(comIOF,4)}</div>
+              <div style={{fontSize:16,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(comIOF,2)}</div>
               <div style={{fontSize:10,color:C.textLight}}>{settings.iof}% IOF + {settings.spread}% spread</div>
             </div>
           )}
@@ -804,9 +1075,9 @@ function CotacaoBcbCard({settings}) {
       {rate && (
         <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.success}22`,display:"flex",gap:10}}>
           {[
-            {label:"Mercado",val:fmtBRL(rate,4),color:C.text},
-            {label:"c/ IOF+spread",val:fmtBRL(comIOF,4),color:C.warning},
-            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,4),color:rate<=settings.dollarPago?C.danger:C.success},
+            {label:"Mercado",val:fmtBRL(rate,2),color:C.text},
+            {label:"c/ IOF+spread",val:fmtBRL(comIOF,2),color:C.warning},
+            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,2),color:rate<=settings.dollarPago?C.danger:C.success},
           ].map(({label,val,color})=>(
             <div key={label} style={{flex:1,textAlign:"center",background:"rgba(255,255,255,0.6)",borderRadius:8,padding:"6px 4px"}}>
               <div style={{fontSize:9,color:C.textLight,marginBottom:2,fontWeight:600,textTransform:"uppercase"}}>{label}</div>
@@ -831,7 +1102,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
       <div style={S.heroCard}>
         <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Total planejado</div>
         <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: {fmtBRL(settings.dollarPago,4)} · Ajustado: {fmtBRL(calcDolarAjustado(settings),4)}</div>
+        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: {fmtBRL(settings.dollarPago,2)}</div>
         <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
           {[`IOF ${settings.iof}%`,`Spread ${settings.spread}%`,`Taxa ${settings.taxa}%`].map(t=>(
             <span key={t} style={{background:"rgba(255,255,255,0.15)",borderRadius:999,padding:"3px 10px",fontSize:11,color:"rgba(255,255,255,0.9)",fontWeight:500}}>{t}</span>
@@ -946,6 +1217,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
 function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,onToggleStatus,parcelas}) {
   const [filtro,setFiltro]=useState("todos");
   const [subTab,setSubTab]=useState("gastos");
+  const [busca,setBusca]=useState("");
 
   const totalUSD=gastos.reduce((a,g)=>a+calcMinhaParteUSD(g,produtos),0);
   const aReceberUSD=gastos.reduce((a,g)=>{
@@ -954,8 +1226,13 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
   },0);
 
   const filtrados=gastos.filter(g=>{
-    if(filtro==="compras") return g.tipo==="produto";
-    if(filtro==="livres") return g.tipo!=="produto";
+    if(filtro==="compras"&&g.tipo!=="produto") return false;
+    if(filtro==="livres"&&g.tipo==="produto") return false;
+    if(busca){
+      const termo=busca.toLowerCase();
+      const match=(g.descricao||"").toLowerCase().includes(termo)||(g.loja||"").toLowerCase().includes(termo);
+      if(!match) return false;
+    }
     return true;
   }).sort((a,b)=>(b.id||0)-(a.id||0));
 
@@ -967,7 +1244,7 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
           <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
         ))}
       </div>
-      {subTab==="totais"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]}/>}
+      {subTab==="totais"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]} produtos={produtos||[]}/>}
       {subTab==="gastos"&&<>
       {/* Resumo topo */}
       <div style={S.heroCard}>
@@ -987,13 +1264,15 @@ function GastosTab({gastos,settings,onAdd,onEdit,onDelete,onTogglePago,produtos,
       </div>
 
       {/* Filtros */}
+      <input style={S.searchInput} placeholder="🔍 Buscar por descrição ou loja..." value={busca} onChange={e=>setBusca(e.target.value)}/>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
         {[["todos","Todos"],["compras","🛍 Compras"],["livres","✏ Manuais"]].map(([v,l])=>(
           <button key={v} style={{flex:1,padding:"8px 4px",borderRadius:9,border:"none",cursor:"pointer",fontSize:12,fontWeight:600,background:filtro===v?C.bgCard:"transparent",color:filtro===v?C.primary:C.textMid,boxShadow:filtro===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setFiltro(v)}>{l}</button>
         ))}
       </div>
 
-      {filtrados.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente."/>}
+      {filtrados.length===0&&gastos.length>0&&<Empty text="Nenhum gasto encontrado"/>}
+      {gastos.length===0&&<Empty text="Nenhum gasto ainda. Marque produtos como comprados ou adicione gastos manualmente." actionLabel="＋ Adicionar gasto" onAction={onAdd}/>}
 
       {filtrados.map(g=><GastoCard key={g.id} g={g} settings={settings} onEdit={()=>onEdit(g)} onDelete={()=>onDelete(g.id)} onTogglePago={onTogglePago} produtos={produtos}/>)}
       </>}
@@ -1060,7 +1339,7 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago,produtos}) {
             {label:"Total USD",value:`${fmtUSD(totalUSD,2)}`,color:C.primary},
             {label:"Minha parte USD",value:`${fmtUSD(minhaUSD,2)}`,color:C.primary},
             {label:"Minha parte BRL",value:`${fmtBRL(minhaBRL,2)}`,color:C.textMid},
-            {label:"Cotação usada",value:`${fmtBRL(cotUsada,4)}`},
+            {label:"Cotação usada",value:`${fmtBRL(cotUsada,2)}`},
             ...(temDivisao?[{label:"Dividido entre",value:`${totalPessoas} pessoas`}]:[]),
           ].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
@@ -1113,13 +1392,25 @@ function GastoForm({gasto,settings,onSave,onClose}) {
 
   function addPessoa(){
     if(!novaPessoa.trim())return;
-    const qtd=f.divisao.length+2; // +1 nova pessoa +1 eu
-    const valorPadrao=totalUSD>0?parseFloat((totalUSD/qtd).toFixed(2)):0;
-    setF(p=>({...p,divisao:[...p.divisao,{nome:novaPessoa.trim(),pago:false,valor:valorPadrao}]}));
+    const novaLista=[...f.divisao,{nome:novaPessoa.trim(),pago:false,valor:0}];
+    const n=1+novaLista.length;
+    const parteIgual=totalUSD>0?parseFloat((totalUSD/n).toFixed(2)):0;
+    setF(p=>({...p,divisao:novaLista.map(d=>({...d,valor:parteIgual}))}));
     setNovaPessoa("");
   }
   function removePessoa(i){setF(p=>({...p,divisao:p.divisao.filter((_,idx)=>idx!==i)}));}
   function updateValor(i,val){setF(p=>({...p,divisao:p.divisao.map((item,idx)=>idx===i?{...item,valor:parseFloat(val)||0}:item)}));}
+  function distribuirIgualmente(){
+    if(f.divisao.length===0||totalUSD<=0)return;
+    const n=1+f.divisao.length;
+    const base=Math.floor((totalUSD/n)*100)/100; // arredonda para baixo, em centavos
+    const resto=Math.round((totalUSD-base*n)*100)/100; // sobra de centavos
+    setF(p=>({...p,divisao:p.divisao.map((item,idx)=>({
+      ...item,
+      // a sobra de centavos vai para a última pessoa da lista
+      valor: idx===p.divisao.length-1 ? Math.round((base+resto)*100)/100 : base
+    }))}));
+  }
 
   function handleSave(){
     if(!f.descricao)return alert("Informe a descrição");
@@ -1138,9 +1429,19 @@ function GastoForm({gasto,settings,onSave,onClose}) {
       <label style={S.label}>Local / Loja (opcional)</label>
       <input style={S.input} placeholder="Ex: McDonald's International Drive" value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
       <label style={S.label}>Valor em USD *</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Ex: 45.90" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 45.90" value={f.usd} onChange={e=>{
+        const novoValor=e.target.value;
+        const novoTotal=parseFloat(novoValor)||0;
+        const somaAtual=f.divisao.reduce((a,p)=>a+(parseFloat(p.valor)||0),0);
+        setF(p=>({
+          ...p,
+          usd:novoValor,
+          // Mantém a proporção de cada parte ao mudar o total (preserva ajustes manuais)
+          divisao: somaAtual>0 ? p.divisao.map(d=>({...d,valor:Math.round((parseFloat(d.valor)||0)*(novoTotal/somaAtual)*100)/100})) : p.divisao
+        }));
+      }}/>
       <div style={{background:C.primaryLight,border:`1px solid ${C.primary}22`,borderRadius:9,padding:"8px 12px",fontSize:12,color:C.textMid,marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>{fmtBRL((parseFloat(f.dolarPago)||settings.dollarPago),4)}</strong></span>
+        <span>Cotação do dólar pago: <strong style={{color:C.primary}}>{fmtBRL((parseFloat(f.dolarPago)||settings.dollarPago),2)}</strong></span>
         <span style={{color:C.textLight,fontSize:11}}>automática das configurações</span>
       </div>
       <label style={S.label}>Data</label>
@@ -1179,7 +1480,7 @@ function GastoForm({gasto,settings,onSave,onClose}) {
             <div style={{display:"flex",alignItems:"center",gap:4}}>
               <span style={{fontSize:11,color:C.textLight}}>US$</span>
               <input
-                type="number" step="0.01"
+                type="number" inputMode="decimal" step="0.01"
                 value={p.valor||""}
                 onChange={e=>updateValor(i,e.target.value)}
                 style={{width:76,background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:7,padding:"5px 7px",fontSize:13,color:C.text,fontFamily:"'DM Mono',monospace",outline:"none",boxSizing:"border-box"}}
@@ -1195,6 +1496,9 @@ function GastoForm({gasto,settings,onSave,onClose}) {
               <div style={{fontSize:11,color:C.warning,marginTop:4,fontWeight:500}}>⚠ Soma das partes ({fmtUSD((somaDivisao+minhaParteUSD),2)}) ≠ total ({fmtUSD(totalUSD,2)})</div>
             )}
           </div>
+        )}
+        {f.divisao.length>0&&totalUSD>0&&(
+          <button style={{...S.btnOutline,width:"100%",marginTop:8,justifyContent:"center"}} onClick={distribuirIgualmente}>⚖ Distribuir igualmente</button>
         )}
       </div>
       <button style={S.btnPrimary} onClick={handleSave}>{gasto?.id?"Salvar alterações":"Adicionar gasto"}</button>
@@ -1368,7 +1672,7 @@ function RoteiroTab({ planejamento, setPlanejamento }) {
         <button style={{...S.btnPrimary,padding:"7px 14px",fontSize:13,marginBottom:0,width:"auto"}} onClick={()=>{setEditEvento(null);setShowEventoForm(true);}}>＋ Evento</button>
       </div>
 
-      {(eventos||[]).length===0&&<Empty text="Nenhum evento. Toque em ＋ ou clique em um dia no calendário."/>}
+      {(eventos||[]).length===0&&<Empty text="Nenhum evento. Toque em ＋ ou clique em um dia no calendário." actionLabel="＋ Adicionar evento" onAction={()=>{setEditEvento(null);setShowEventoForm(true);}}/>}
 
       {Object.keys(eventosPorData).sort().map(data=>(
         <div key={data} style={{marginBottom:12}}>
@@ -1507,17 +1811,17 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
 
 // ─── CONVERSOR (era CalcTab original) ────────────────────────────────────────
 function ConversorTab({settings}) {
-  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState("");
-  const dolarAj=calcDolarAjustado(settings); const brlP=parseFloat(usdN)*(1+settings.taxa/100)*dolarAj; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*(1+settings.taxa/100)*parseFloat(dc):null;
+  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState(""); const [floz,setFloz]=useState("");
+  const brlP=(parseFloat(usdN)||0)*settings.dollarPago; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*parseFloat(dc):null;
   return (
     <>
       <div style={S.sectionLabel}>💵 Conversor USD → BRL</div>
       <div style={S.card}>
         <label style={S.label}>Valor em USD</label>
-        <input style={S.input} type="number" placeholder="Ex: 150" value={usdN} onChange={e=>setUsdN(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 150" value={usdN} onChange={e=>setUsdN(e.target.value)}/>
         {usdN&&<div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>BRL estimado</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brlP)}</span></div>}
         <label style={{...S.label,marginTop:8}}>Dólar que você pagou (opcional)</label>
-        <input style={S.input} type="number" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 5.71" value={dc} onChange={e=>setDc(e.target.value)}/>
         {brlC&&parseFloat(usdN)>0&&[{label:"Com seu dólar",value:fmtBRL(brlC),color:C.success},{label:"Diferença",value:fmtBRL(brlP-brlC),color:brlP>brlC?C.success:C.danger}].map(({label,value,color})=>(
           <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"7px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{label}</span><span style={{fontSize:13,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span></div>
         ))}
@@ -1525,22 +1829,24 @@ function ConversorTab({settings}) {
       <div style={S.sectionLabel}>⚖ Conversor de Peso</div>
       <div style={S.card}>
         <label style={S.label}>Libras (lbs)</label>
-        <input style={S.input} type="number" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 2.5" value={lbs} onChange={e=>setLbs(e.target.value)}/>
         {lbs&&[[`Gramas`,`${fmtN(parseFloat(lbs)*453.592,1)}g`],[`Kg`,`${fmtN(parseFloat(lbs)*0.453592,3)}kg`],["Oz",`${fmtN(parseFloat(lbs)*16,1)} oz`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
         <div style={{height:12}}/>
         <label style={S.label}>Onças (oz)</label>
-        <input style={S.input} type="number" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
         {oz&&[["Gramas",`${fmtN(parseFloat(oz)*28.3495,1)}g`],["Kg",`${fmtN(parseFloat(oz)*28.3495/1000,3)}kg`],["Libras",`${fmtN(parseFloat(oz)/16,3)} lbs`]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+        <div style={{height:12}}/>
+        <label style={S.label}>Fl Oz (onça fluida)</label>
+        <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 8" value={floz} onChange={e=>setFloz(e.target.value)}/>
+        {floz&&[["Mililitros",`${fmtN(parseFloat(floz)*29.5735,1)}ml`],["Litros",`${fmtN(parseFloat(floz)*29.5735/1000,3)}L`],["Gramas (equiv.)",`${fmtN(parseFloat(floz)*29.5735,1)}g`],["Kg (equiv.)",`${fmtN(parseFloat(floz)*29.5735/1000,3)}kg`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
       </div>
       <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:10}}>Taxas e cotações</div>
-        {[["Dólar pago",fmtBRL(settings.dollarPago,4)],["IOF",`${settings.iof}%`],["Spread",`${settings.spread}%`],["Taxa compra",`${settings.taxa}%`],["Dólar ajustado",fmtBRL(dolarAj,4)]].map(([l,v])=>(
-          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
-        ))}
         <BcbRate/>
       </div>
     </>
@@ -1548,7 +1854,7 @@ function ConversorTab({settings}) {
 }
 
 // ─── SIMULADOR ───────────────────────────────────────────────────────────────
-function SimuladorTab({settings, gastos, parcelas}) {
+function SimuladorTab({settings, gastos, parcelas, produtos}) {
   const totalGastosUSD = calcTotalGastosUSD(gastos, produtos||[]);
   const totalParcelasMensal = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte||p.valorParcela)||0)/parseInt(p.quantidadeParcelas||1),0);
   const totalParcelasBRL = parcelas.reduce((a,p)=>a+(parseFloat(p.minhaParte)||parseFloat(p.valorTotal)||0),0);
@@ -1566,7 +1872,7 @@ function SimuladorTab({settings, gastos, parcelas}) {
     const vp=mp>0&&qt>0 ? mp/qt : (parseFloat(p.valorParcela)||0);
     return a+restante*vp;
   },0);
-  const usdGastosEmBRL = totalGastosUSD * calcDolarAjustado(settings);
+  const usdGastosEmBRL = totalGastosUSD * settings.dollarPago;
   const totalViagem = usdGastosEmBRL + totalParcelasRestBRL;
 
   return (
@@ -1579,7 +1885,7 @@ function SimuladorTab({settings, gastos, parcelas}) {
       <div style={S.card}>
         <div style={{fontWeight:700,fontSize:13,color:C.text,marginBottom:12}}>Composição do custo</div>
         {[
-          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(calcDolarAjustado(settings),4)} (c/ IOF+spread)`},
+          {label:"💸 Gastos na viagem (USD→BRL)",value:fmtBRL(usdGastosEmBRL),color:C.primary,sub:`${fmtUSD(totalGastosUSD)} × ${fmtBRL(settings.dollarPago,2)} (dólar médio)`},
           {label:"💳 Parcelas restantes (BRL)",value:fmtBRL(totalParcelasRestBRL),color:C.purple,sub:`${parcelas.filter(p=>(p.statusMensal||[]).some(s=>!s)).length} itens com parcelas a pagar`},
           {label:"📊 Total comprometido",value:fmtBRL(totalViagem),color:C.text,sub:""},
         ].map(({label,value,color,sub})=>(
@@ -1653,10 +1959,24 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
           <div style={{background:custoMedio>cotacaoComTaxas?"rgba(239,68,68,0.3)":"rgba(16,185,129,0.3)",borderRadius:12,padding:"8px 12px",flex:1,textAlign:"center"}}>
             <div style={{fontSize:10,color:"rgba(255,255,255,0.65)",marginBottom:2}}>{custoMedio>cotacaoComTaxas?"Acima":"Abaixo"} mercado+taxas</div>
             <div style={{fontSize:14,fontWeight:700,color:"#fff",fontFamily:"'DM Mono',monospace"}}>{custoMedio>0?`${custoMedio>cotacaoComTaxas?"+":"-"}${fmtBRL(Math.abs(custoMedio-cotacaoComTaxas),4)}`:"—"}</div>
-            {cotacaoBCB&&<div style={{fontSize:9,color:"rgba(255,255,255,0.6)",marginTop:2}}>mercado BCB: {fmtBRL(cotacaoBCB,4)}</div>}
+            {cotacaoBCB&&<div style={{fontSize:9,color:"rgba(255,255,255,0.6)",marginTop:2}}>mercado BCB: {fmtBRL(cotacaoBCB,2)}</div>}
           </div>
         </div>
       </div>
+
+      {settings.totalDolarViagem>0&&(()=>{
+        const faltam=settings.totalDolarViagem-totalUSD;
+        const metaAtingida=faltam<=0;
+        return (
+          <div style={{...S.card,marginBottom:14,background:metaAtingida?"#ECFDF5":"#FFF7ED",border:`1px solid ${metaAtingida?"#10B981":"#FFEDD5"}`,textAlign:"center"}}>
+            <div style={{fontSize:11,fontWeight:600,color:metaAtingida?"#065F46":"#9A3412"}}>{metaAtingida?"🎯 Meta atingida!":"📉 Falta comprar"}</div>
+            <div style={{fontSize:18,fontWeight:800,color:metaAtingida?"#10B981":"#EA580C",marginTop:4,fontFamily:"'DM Mono',monospace"}}>
+              {metaAtingida?`+${fmtUSD(Math.abs(faltam))} acima da meta`:fmtUSD(faltam)}
+            </div>
+            <div style={{fontSize:11,color:C.textLight,marginTop:4}}>Meta: {fmtUSD(settings.totalDolarViagem)} · Comprado: {fmtUSD(totalUSD)}</div>
+          </div>
+        );
+      })()}
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
         {showForm?"Cancelar":"＋ Registrar compra de dólar"}
@@ -1668,8 +1988,8 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
           <label style={S.label}>Data</label>
           <input style={S.input} type="date" value={f.data} onChange={e=>setF(p=>({...p,data:e.target.value}))}/>
           <div style={{display:"flex",gap:10}}>
-            <div style={{flex:1}}><label style={S.label}>Quantidade (US$)</label><input style={S.input} type="number" step="50" placeholder="Ex: 500" value={f.quantidade} onChange={e=>setF(p=>({...p,quantidade:e.target.value}))}/></div>
-            <div style={{flex:1}}><label style={S.label}>Cotação (R$)</label><input style={S.input} type="number" step="0.01" placeholder="Ex: 5.65" value={f.cotacao} onChange={e=>setF(p=>({...p,cotacao:e.target.value}))}/></div>
+            <div style={{flex:1}}><label style={S.label}>Quantidade (US$)</label><input style={S.input} type="number" inputMode="decimal" step="50" placeholder="Ex: 500" value={f.quantidade} onChange={e=>setF(p=>({...p,quantidade:e.target.value}))}/></div>
+            <div style={{flex:1}}><label style={S.label}>Cotação (R$)</label><input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 5.65" value={f.cotacao} onChange={e=>setF(p=>({...p,cotacao:e.target.value}))}/></div>
           </div>
           {f.quantidade&&f.cotacao&&<div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginBottom:12}}>Total: {fmtBRL(parseFloat(f.quantidade)*parseFloat(f.cotacao))}</div>}
           <label style={S.label}>Observação (opcional)</label>
@@ -1678,7 +1998,7 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
         </div>
       )}
 
-      {comprasDolar.length===0&&<Empty text="Nenhuma compra registrada ainda."/>}
+      {comprasDolar.length===0&&<Empty text="Nenhuma compra registrada ainda." actionLabel="＋ Registrar compra" onAction={()=>setShowForm(true)}/>}
       {[...comprasDolar].reverse().map(c=>(
         <div key={c.id} style={{...S.card,marginBottom:8,padding:"10px 14px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
@@ -1687,7 +2007,7 @@ function HistoricoDolarTab({comprasDolar, setComprasDolar, settings}) {
               <div style={{fontSize:12,color:C.textLight,marginTop:1}}>{c.data?new Date(c.data+"T12:00:00").toLocaleDateString("pt-BR"):""}{c.obs?` · ${c.obs}`:""}</div>
             </div>
             <div style={{textAlign:"right"}}>
-              <div style={{fontSize:13,fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(parseFloat(c.cotacao),4)}/US$</div>
+              <div style={{fontSize:13,fontWeight:700,color:C.purple,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(parseFloat(c.cotacao),2)}/US$</div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(c.quantidade*c.cotacao)}</div>
             </div>
             <button onClick={()=>setComprasDolar(ps=>ps.filter(p=>p.id!==c.id))} style={{background:C.dangerLight,border:"none",borderRadius:6,width:24,height:24,cursor:"pointer",color:C.danger,fontSize:12,marginLeft:8,flexShrink:0}}>✕</button>
@@ -1704,7 +2024,7 @@ function BagagemTab({produtos, settings}) {
   const categorias = [
     {label:"📱 Eletrônicos",lojas:["Apple","Best Buy","Newegg"],cor:C.primary},
     {label:"👗 Roupas",lojas:["Tommy Hilfiger","Calvin Klein","The North Face","Marshalls","Ross","TJ Maxx"],cor:C.purple},
-    {label:"💧 Líquidos",tipo:"liquido",cor:C.success},
+    {label:"💧 Líquidos",tipoPeso:["oz_liquido"],cor:C.success},
     {label:"🛍 Outros",cor:C.warning},
   ];
   const pesoTotal = produtos.filter(p=>p.status==="comprado").reduce((a,p)=>a+prodPeso(p),0);
@@ -1713,7 +2033,7 @@ function BagagemTab({produtos, settings}) {
 
   const porCategoria = categorias.map(cat=>{
     const itens = produtos.filter(p=>p.status==="comprado"&&(
-      cat.tipo ? p.tipo===cat.tipo :
+      cat.tipoPeso ? cat.tipoPeso.includes(p.tipoPeso||"g") :
       cat.lojas ? cat.lojas.includes(p.loja) :
       true
     ));
@@ -1860,6 +2180,188 @@ function ChecklistTab({checklist, setChecklist}) {
   );
 }
 
+// ─── DOCUMENTOS (armazenamento offline via IndexedDB) ──────────────────────────
+const DOC_ICONS = {
+  "application/pdf": "📄",
+  "application/msword": "📝",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "📝",
+  "image/": "🖼️",
+};
+function docIcon(mimeType) {
+  if (!mimeType) return "📎";
+  for (const [prefix, icon] of Object.entries(DOC_ICONS)) {
+    if (mimeType.startsWith(prefix)) return icon;
+  }
+  return "📎";
+}
+
+function DocumentosTab({uid}) {
+  const [documentos, setDocumentos] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [f, setF] = useState({texto:"", file:null});
+  const [viewer, setViewer] = useState(null); // {fileName, mimeType, data, texto}
+  const [downloadHint, setDownloadHint] = useState(false);
+  const fileRef = useRef(null);
+
+  useEffect(() => {
+    if (!uid) { setLoading(false); return; }
+    setLoading(true);
+    const unsub = ouvirDocumentos(uid, docs => {
+      setDocumentos(docs);
+      setLoading(false);
+    });
+    return () => unsub();
+  }, [uid]);
+
+  async function salvar() {
+    if (!f.file && !f.texto.trim()) return alert("Selecione um arquivo ou escreva um texto.");
+    if (!navigator.onLine && f.file) return alert("📡 Sem internet. Conecte-se à rede para enviar arquivos.");
+    setSaving(true);
+    try {
+      await salvarDocumento(uid, f);
+      setF({texto:"", file:null});
+      if (fileRef.current) fileRef.current.value = "";
+      setShowForm(false);
+    } catch (e) {
+      console.error("Erro ao salvar documento:", e);
+      alert(e.message?.includes("muito grande") ? e.message : "Erro ao salvar documento. Verifique sua conexão.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remover(item) {
+    if (!confirm("Remover este documento?")) return;
+    try {
+      await removerDocumento(uid, item);
+    } catch (e) {
+      console.error("Erro ao remover documento:", e);
+      alert("Erro ao remover documento.");
+    }
+  }
+
+  async function abrir(item) {
+    if (!item.numChunks) { setViewer({...item, data: null}); return; }
+    try {
+      const data = await obterArquivo(uid, item);
+      setViewer({...item, data});
+    } catch (e) {
+      console.error("Erro ao abrir documento:", e);
+      alert("Não foi possível abrir o arquivo offline. Conecte-se à internet.");
+    }
+  }
+
+  async function baixar(item) {
+    let data = item.data;
+    if (!data) {
+      try { data = await obterArquivo(uid, item); } catch (e) { return alert("Não foi possível baixar offline."); }
+    }
+    try {
+      // Converte data URL (base64) em Blob para um download mais confiável no mobile
+      const [, meta, base64] = data.match(/^data:(.*?);base64,(.*)$/) || [];
+      const byteChars = atob(base64);
+      const byteArrays = new Uint8Array(byteChars.length);
+      for (let i = 0; i < byteChars.length; i++) byteArrays[i] = byteChars.charCodeAt(i);
+      const blob = new Blob([byteArrays], { type: item.mimeType || meta || "application/octet-stream" });
+      const blobUrl = URL.createObjectURL(blob);
+
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = item.fileName || "documento";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+
+      // No mobile, abrir em nova aba garante acesso ao arquivo mesmo se o
+      // navegador não disparar o diálogo de "Salvar" automaticamente.
+      setTimeout(() => {
+        window.open(blobUrl, "_blank");
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 30000);
+      }, 150);
+
+      setDownloadHint(true);
+      setTimeout(()=>setDownloadHint(false), 6000);
+    } catch (e) {
+      console.error("Erro ao baixar:", e);
+      // Fallback: abre direto a data URL
+      window.open(data, "_blank");
+    }
+  }
+
+  return (
+    <>
+      <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
+        <div style={{fontSize:12,color:"#0369A1"}}>📦 Documentos sincronizam entre seus dispositivos (sem servidor de arquivos extra). Uma cópia também fica salva no aparelho para abrir offline. Limite ~2,5MB por arquivo (imagens são comprimidas automaticamente se necessário).</div>
+      </div>
+
+      {downloadHint&&(
+        <div style={{...S.card,background:C.successLight,border:`1px solid ${C.success}33`,padding:"10px 14px",marginBottom:12}}>
+          <div style={{fontSize:12,color:C.success,fontWeight:600}}>⬇ Download iniciado! Se não aparecer na pasta Downloads, o arquivo abrirá em outra aba — toque em "⋮" (menu) e escolha "Salvar" ou "Compartilhar".</div>
+        </div>
+      )}
+
+      <button style={{...S.btnPrimary,marginBottom:14}} onClick={()=>setShowForm(s=>!s)}>
+        {showForm?"Cancelar":"＋ Adicionar documento"}
+      </button>
+
+      {showForm&&(
+        <div style={{...S.card,marginBottom:14}}>
+          <label style={S.label}>Arquivo (PDF, imagem, Word...)</label>
+          <input ref={fileRef} type="file" accept=".pdf,.doc,.docx,image/*" onChange={e=>setF(p=>({...p,file:e.target.files[0]||null}))} style={{...S.input,padding:"8px 10px"}}/>
+          <label style={S.label}>Anotação / Descrição</label>
+          <textarea style={{...S.input,minHeight:80,resize:"vertical",fontFamily:"'Inter',sans-serif"}} placeholder="Ex: Voucher do hotel, passagem aérea, comprovante..." value={f.texto} onChange={e=>setF(p=>({...p,texto:e.target.value}))}/>
+          <button style={S.btnPrimary} disabled={saving} onClick={salvar}>{saving?"Enviando...":"Salvar documento"}</button>
+        </div>
+      )}
+
+      {loading&&<Empty text="Carregando documentos..."/>}
+      {!loading&&documentos.length===0&&<Empty text="Nenhum documento salvo ainda." actionLabel="＋ Adicionar documento" onAction={()=>setShowForm(true)}/>}
+
+      {documentos.map(item=>(
+        <div key={item.id} style={{...S.card,marginBottom:8,padding:"12px 14px"}}>
+          <div style={{display:"flex",gap:10,alignItems:"flex-start"}}>
+            <div style={{fontSize:28,flexShrink:0}}>{docIcon(item.mimeType)}</div>
+            <div style={{flex:1,minWidth:0}}>
+              {item.fileName&&<div style={{fontSize:13,fontWeight:700,color:C.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.fileName}</div>}
+              {item.texto&&<div style={{fontSize:12,color:C.textMid,marginTop:item.fileName?2:0,whiteSpace:"pre-wrap"}}>{item.texto}</div>}
+              <div style={{fontSize:11,color:C.textLight,marginTop:4}}>{new Date(item.criadoEm).toLocaleDateString("pt-BR",{day:"2-digit",month:"short",year:"numeric"})}</div>
+              <div style={{display:"flex",gap:8,marginTop:8}}>
+                {item.numChunks&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>abrir(item)}>👁 Abrir</button>}
+                {item.numChunks&&<button style={{...S.btnOutline,padding:"6px 12px",fontSize:12}} onClick={()=>baixar(item)}>⬇ Baixar</button>}
+                <button style={{...S.btnOutline,padding:"6px 12px",fontSize:12,color:C.danger,borderColor:C.danger+"44"}} onClick={()=>remover(item)}>🗑</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      {viewer&&(
+        <Modal title={viewer.fileName||"Documento"} onClose={()=>setViewer(null)}>
+          {viewer.data&&viewer.mimeType?.startsWith("image/")&&<img src={viewer.data} alt={viewer.fileName} style={{width:"100%",borderRadius:10}}/>}
+          {viewer.data&&viewer.mimeType==="application/pdf"&&<iframe src={viewer.data} title={viewer.fileName} style={{width:"100%",height:"70vh",border:"none",borderRadius:10}}/>}
+          {viewer.data&&!viewer.mimeType?.startsWith("image/")&&viewer.mimeType!=="application/pdf"&&(
+            <div style={{textAlign:"center",padding:"24px 0"}}>
+              <div style={{fontSize:40,marginBottom:10}}>{docIcon(viewer.mimeType)}</div>
+              <div style={{fontSize:13,color:C.textMid,marginBottom:14}}>Pré-visualização não disponível para este tipo de arquivo.</div>
+              <button style={S.btnPrimary} onClick={()=>baixar(viewer)}>⬇ Baixar arquivo</button>
+            </div>
+          )}
+          {!viewer.data&&(
+            <div style={{textAlign:"center",padding:"24px 0"}}>
+              <div style={{fontSize:40,marginBottom:10}}>📡</div>
+              <div style={{fontSize:13,color:C.textMid}}>Não foi possível carregar o arquivo. Conecte-se à internet.</div>
+            </div>
+          )}
+          {viewer.texto&&<div style={{marginTop:12,fontSize:13,color:C.textMid,whiteSpace:"pre-wrap"}}>{viewer.texto}</div>}
+        </Modal>
+      )}
+    </>
+  );
+}
+
+
 // ─── PARCELAS TAB ─────────────────────────────────────────────────────────────
 const MESES_LABELS = ["1ª","2ª","3ª","4ª","5ª","6ª","7ª","8ª","9ª","10ª","11ª","12ª","13ª","14ª","15ª","16ª","17ª","18ª","19ª","20ª","21ª","22ª","23ª","24ª"];
 const MESES_NOMES = ["jan","fev","mar","abr","mai","jun","jul","ago","set","out","nov","dez"];
@@ -1971,7 +2473,7 @@ function ParcelasTab({ parcelas, setParcelas }) {
 
       <button style={{...S.btnPrimary,marginBottom:14}} onClick={abrirNova}>＋ Nova parcela</button>
 
-      {parcelas.length === 0 && <Empty text="Nenhuma parcela cadastrada ainda."/>}
+      {parcelas.length === 0 && <Empty text="Nenhuma parcela cadastrada ainda." actionLabel="＋ Nova parcela" onAction={abrirNova}/>}
 
       {parcelas.map(p => (
         <ParcelaCard
@@ -2206,13 +2708,13 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       <input style={S.input} placeholder="Ex: Passagem aérea, Hotel, Ingressos..." value={f.descricao} onChange={e => setF(p => ({...p, descricao: e.target.value}))}/>
 
       <label style={S.label}>Valor Total (R$)</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Ex: 2500.00" value={f.valorTotal||""} onChange={e => setF(p => ({...p, valorTotal: e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 2500.00" value={f.valorTotal||""} onChange={e => setF(p => ({...p, valorTotal: e.target.value}))}/>
 
       <label style={S.label}>Quantidade de Parcelas *</label>
-      <input style={S.input} type="number" step="1" min="1" max="24" placeholder="Ex: 10" value={f.quantidadeParcelas||""} onChange={e => setF(p => ({...p, quantidadeParcelas: e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="numeric" step="1" min="1" max="24" placeholder="Ex: 10" value={f.quantidadeParcelas||""} onChange={e => setF(p => ({...p, quantidadeParcelas: e.target.value}))}/>
 
       <label style={S.label}>Valor da Parcela (R$)</label>
-      <input style={S.input} type="number" step="0.01" placeholder="Calculado automaticamente" value={f.valorParcela||""} onChange={e => setF(p => ({...p, valorParcela: e.target.value}))}/>
+      <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Calculado automaticamente" value={f.valorParcela||""} onChange={e => setF(p => ({...p, valorParcela: e.target.value}))}/>
 
       <label style={S.label}>Cartão / Forma de Pagamento</label>
       <input style={S.input} placeholder="Ex: Nubank, Itaú, C6..." value={f.cartao||""} onChange={e => setF(p => ({...p, cartao: e.target.value}))}/>
@@ -2227,11 +2729,11 @@ function ParcelaForm({ parcela, onSalvar, onClose }) {
       <div style={{display:"flex",gap:8,marginBottom:14}}>
         <div style={{flex:1}}>
           <label style={S.label}>Dividido entre (pessoas)</label>
-          <input style={S.input} type="number" min="2" step="1" placeholder="Ex: 2" value={f.nPessoas||""} onChange={e => setF(p => ({...p, nPessoas: e.target.value}))}/>
+          <input style={S.input} type="number" inputMode="numeric" min="2" step="1" placeholder="Ex: 2" value={f.nPessoas||""} onChange={e => setF(p => ({...p, nPessoas: e.target.value}))}/>
         </div>
         <div style={{flex:1}}>
           <label style={S.label}>Minha parte (R$)</label>
-          <input style={S.input} type="number" step="0.01" placeholder="Calculado auto." value={f.minhaParte||""} onChange={e => setF(p => ({...p, minhaParte: e.target.value}))}/>
+          <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Calculado auto." value={f.minhaParte||""} onChange={e => setF(p => ({...p, minhaParte: e.target.value}))}/>
         </div>
       </div>
 
@@ -2279,6 +2781,7 @@ function ProdutosTab({produtos,itensLegais,settings,onToggle,onDelete,onEdit,onA
       <div style={{fontSize:12,color:C.textLight,marginBottom:10,fontWeight:500}}>{filtered.length} item(s)</div>
       {filtered.map(p=><ProdutoCard key={p.id} p={p} settings={settings} onToggle={subTab==="compras"?()=>onToggle(p.id):null} onDelete={()=>onDelete(p.id,subTab==="legais"?"legais":"produtos")} onEdit={()=>onEdit({...p,_legais:subTab==="legais"})} onMoveToList={subTab==="legais"?()=>onMoveToList(p):null} onMoveToLegais={subTab==="compras"?()=>onMoveToLegais(p):null} isLegais={subTab==="legais"} onUpdate={onUpdate}/>)}
       {filtered.length===0&&lista.length>0&&<Empty text="Nenhum item encontrado"/>}
+      {lista.length===0&&<Empty text="Nenhum item cadastrado ainda." actionLabel="＋ Adicionar item" onAction={onAdd}/>}
     </div>
   );
 }
@@ -2287,12 +2790,10 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
   const [expanded,setExpanded]=useState(false);
   const isComprado=p.status==="comprado";
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
-  const qtdCad=prodQtdCad(p); // quantidade planejada/cadastrada
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
-  const usdPlanejado=usdUnit*qtdCad; // total planejado (qtd cadastrada × unitário)
-  const brl=usdPlanejado*calcDolarAjustado(settings);
-  const brlPago=p.dollarPago?calcBRLPago(usdPlanejado,settings,p.dollarPago):null;
+  const brl=usdComTaxa(p)*settings.dollarPago;
+  const brlPago=p.dollarPago?calcBRLPago(usdUnit,settings,p.dollarPago):null;
   const peso=prodPeso(p);
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
   const pc=prioColors[p.prioridade]||prioColors["Média"];
@@ -2307,9 +2808,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
           <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
             <div style={{fontWeight:600,fontSize:14,color:p.status==="comprado"?C.textLight:C.text,textDecoration:p.status==="comprado"?"line-through":"none",lineHeight:1.3,flex:1}}>{p.nome}</div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>
-                {qtdCad>1?<>{fmtUSD(usdPlanejado,2)}<span style={{fontSize:10,color:C.textLight,fontWeight:600}}> ({fmtUSD(usdUnit,2)}×{qtdCad})</span></>:fmtUSD(usdUnit,2)}
-              </div>
+              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,0)}</div>
             </div>
           </div>
@@ -2317,6 +2816,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
             <span style={S.tag}>{p.loja}</span>
             {!isLegais&&<span style={{...S.tag,background:pc.bg,color:pc.color,borderColor:pc.color+"33"}}>{p.prioridade}</span>}
             <span style={S.tag}>{(peso/1000).toLocaleString("pt-BR",{minimumFractionDigits:3,maximumFractionDigits:3})}kg</span>
+            {p.peso>0&&<span style={S.tag}>{p.peso} {p.tipoPeso==="oz_peso"?"Peso Oz":p.tipoPeso==="oz_liquido"?"Líquido Oz":"G"}</span>}
             {p.status==="comprado"&&<span style={{...S.tag,background:C.successLight,color:C.success,borderColor:C.success+"33"}}>✓ Comprado</span>}
             {p.localTaxa&&p.localTaxa!=="isento"&&<span style={{...S.tag,background:C.purpleLight,color:C.purple,borderColor:C.purple+"33"}}>{p.localTaxa==="orlando"?"ORL 6,5%":"KIS 7,5%"}</span>}
           </div>
@@ -2354,11 +2854,43 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
             </div>
           ))}
+          {(p.quantidade||1)>1&&p.status==="comprado"&&(
+            <div style={{marginTop:8,marginBottom:4}}>
+              <div style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6}}>Quantos foram comprados?</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.max(0,(p.qtdComprada||p.quantidade)-1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>−</button>
+                <span style={{fontSize:16,fontWeight:700,color:C.primary,minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||p.quantidade}/{p.quantidade}</span>
+                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.min(p.quantidade,(p.qtdComprada||p.quantidade)+1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>＋</button>
+              </div>
+            </div>
+          )}
+          {/* Seletor de taxa local */}
+          {!isLegais&&<div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
+            <div style={{fontSize:11,fontWeight:700,color:C.textLight,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💰 Taxa local</div>
+            <div style={{display:"flex",gap:6}}>
+              {[{v:"isento",l:"Sem taxa",bg:C.borderLight,col:C.textMid,act:C.textMid,actBg:C.bg},{v:"orlando",l:"Orlando 6,5%",bg:C.primaryLight,col:C.primary,act:C.primary,actBg:C.primaryLight},{v:"kissimmee",l:"Kissimmee 7,5%",bg:C.purpleLight,col:C.purple,act:C.purple,actBg:C.purpleLight}].map(({v,l,actBg,act,bg,col})=>{
+                const active=(p.localTaxa||"isento")===v;
+                return <button key={v} onClick={e=>{e.stopPropagation();onUpdate&&onUpdate(p.id,{localTaxa:v});}} style={{flex:1,padding:"6px 4px",borderRadius:8,border:`1.5px solid ${active?act:C.border}`,background:active?actBg:C.bgCard,color:active?act:C.textLight,fontSize:10,fontWeight:700,cursor:"pointer",transition:"all 0.15s"}}>{l}</button>;
+              })}
+            </div>
+            {(p.localTaxa==="orlando"||p.localTaxa==="kissimmee")&&<div style={{fontSize:11,color:C.textMid,marginTop:6,fontFamily:"'DM Mono',monospace"}}>
+              US$ {fmtN(usdComTaxa(p),2)} c/ imposto · {fmtBRL(usdComTaxa(p)*prodQtdCad(p)*settings.dollarPago)} total
+            </div>}
+          </div>}
+          {/* Controle de quantidade comprada */}
+          {!isLegais&&(p.quantidade||1)>1&&<div style={{marginTop:8,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
+            <span style={{fontSize:13,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
+            <div style={{display:"flex",alignItems:"center",gap:10}}>
+              <button onClick={e=>{e.stopPropagation();const n=Math.max(0,(p.qtdComprada||0)-1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+              <span style={{fontSize:16,fontWeight:800,color:(p.qtdComprada||0)>0?C.success:C.textLight,minWidth:50,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||0}/{p.quantidade}</span>
+              <button onClick={e=>{e.stopPropagation();const n=Math.min(p.quantidade||1,(p.qtdComprada||0)+1);onUpdate&&onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+            </div>
+          </div>}
           {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{display:"block",fontSize:13,color:C.primary,marginTop:8}}>🔗 Ver produto</a>}
           <div style={{display:"flex",gap:8,marginTop:10}}>
             <button style={S.btnOutline} onClick={onEdit}>✏ Editar</button>
             {onMoveToList&&<button style={{...S.btnOutline,color:C.success,borderColor:C.success+"44"}} onClick={onMoveToList}>📋 Mover p/ lista</button>}
-            {onMoveToLegais&&<button style={{...S.btnOutline,color:C.purple,borderColor:C.purple+"44"}} onClick={onMoveToLegais}>⚖️ Mover p/ legais</button>}
+            {onMoveToLegais&&<button style={{...S.btnOutline,color:C.purple,borderColor:C.purple+"44"}} onClick={onMoveToLegais}>✨ Mover p/ legais</button>}
             <button style={{...S.btnOutline,color:C.danger,borderColor:C.danger+"44"}} onClick={onDelete}>🗑</button>
           </div>
         </div>
@@ -2368,22 +2900,30 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
 }
 
 // ─── GALERIA TAB ──────────────────────────────────────────────────────────────
-function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
+function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal,onUpdate,onUpdateLegal}) {
   const [subTab,setSubTab]=useState("compras");
-  const lista=subTab==="legais"?itensLegais:produtos;
+  const [filterLoja,setFilterLoja]=useState("Todas");
+  const [selectedIdx,setSelectedIdx]=useState(null);
+  const listaCompleta=subTab==="legais"?itensLegais:produtos;
+  const isLegais=subTab==="legais";
+  const lista=useMemo(()=>filterLoja==="Todas"?listaCompleta:listaCompleta.filter(p=>p.loja===filterLoja),[listaCompleta,filterLoja]);
+  const selected=selectedIdx!=null?lista[selectedIdx]:null;
   return (
     <div style={S.page}>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
         {[["compras","🛒 Compras"],["legais","✨ Legais"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
+          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>{setSubTab(v);setFilterLoja("Todas");}}>{l}</button>
         ))}
+      </div>
+      <div style={S.filterRow}>
+        {["Todas",...new Set(listaCompleta.map(p=>p.loja||"Não especificada"))].map(l=><button key={l} style={{...S.chip,...(filterLoja===l?S.chipActive:{})}} onClick={()=>setFilterLoja(l)}>{l}</button>)}
       </div>
       <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
         <div style={{fontSize:12,color:"#0369A1"}}>🔍 Imagens buscadas via og:image do link ou DuckDuckGo. Adicione o link do produto para melhor resultado.</div>
       </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        {lista.map(p=>(
-          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>onEdit({...p,_legais:subTab==="legais"})} className="galeria-card">
+        {lista.map((p,i)=>(
+          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>setSelectedIdx(i)} className="galeria-card">
             <div style={{height:120,position:"relative",overflow:"hidden"}}>
               <ProductImage produto={p} iconSize={40}/>
               {p.status==="comprado"&&<div style={{position:"absolute",top:8,right:8,background:C.success,borderRadius:999,padding:"2px 8px",fontSize:10,color:"white",fontWeight:700}}>✓ Comprado</div>}
@@ -2398,12 +2938,103 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit}) {
         ))}
       </div>
       {lista.length===0&&<Empty text="Nenhum item ainda"/>}
+      {selected&&<GaleriaDetailModal
+        p={selected}
+        settings={settings}
+        isLegais={isLegais}
+        onClose={()=>setSelectedIdx(null)}
+        onPrev={selectedIdx>0?()=>setSelectedIdx(i=>i-1):null}
+        onNext={selectedIdx<lista.length-1?()=>setSelectedIdx(i=>i+1):null}
+        onToggle={()=>{ (isLegais?onToggleLegal:onToggle)(selected.id); }}
+        onUpdate={(id,campos)=>{ (isLegais?onUpdateLegal:onUpdate)(id,campos); }}
+        onEditFull={()=>{ onEdit({...selected,_legais:isLegais}); setSelectedIdx(null); }}
+      />}
     </div>
   );
 }
 
+function GaleriaDetailModal({p,settings,isLegais,onClose,onPrev,onNext,onToggle,onUpdate,onEditFull}) {
+  const [link,setLink]=useState(p.link||"");
+  const [fullscreen,setFullscreen]=useState(false);
+  useEffect(()=>{ setLink(p.link||""); },[p.id]);
+  const isComprado=p.status==="comprado";
+  const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
+  const usdUnit=parseFloat(p.usd)||0;
+  const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
+  const brl=usdComTaxa(p)*settings.dollarPago;
+  const arrowBtnStyle={position:"absolute",top:"50%",transform:"translateY(-50%)",background:"rgba(0,0,0,0.4)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",zIndex:5};
+  return (
+    <Modal title={p.nome} onClose={onClose}>
+      <div style={{position:"relative",borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220}}>
+        <div style={{width:"100%",height:"100%",cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
+          <ProductImage produto={p} iconSize={48}/>
+        </div>
+        {onPrev&&<button style={{...arrowBtnStyle,left:8}} onClick={e=>{e.stopPropagation();onPrev();}}>‹</button>}
+        {onNext&&<button style={{...arrowBtnStyle,right:8}} onClick={e=>{e.stopPropagation();onNext();}}>›</button>}
+      </div>
+
+      {fullscreen&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFullscreen(false)}>
+          <button style={{position:"absolute",top:16,right:16,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:16,cursor:"pointer",zIndex:10}} onClick={()=>setFullscreen(false)}>✕</button>
+          {onPrev&&<button style={{...arrowBtnStyle,left:16,width:44,height:44,fontSize:24,background:"rgba(255,255,255,0.15)"}} onClick={e=>{e.stopPropagation();onPrev();}}>‹</button>}
+          {onNext&&<button style={{...arrowBtnStyle,right:16,width:44,height:44,fontSize:24,background:"rgba(255,255,255,0.15)"}} onClick={e=>{e.stopPropagation();onNext();}}>›</button>}
+          <div style={{width:"92vw",height:"80vh",maxWidth:600}} onClick={e=>e.stopPropagation()}>
+            <ProductImage produto={p} iconSize={64} style={{background:"transparent"}} fit="contain"/>
+          </div>
+        </div>
+      )}
+
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+        <div>
+          <div style={{fontSize:20,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
+          <div style={{fontSize:12,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,2)}</div>
+        </div>
+        <button onClick={onToggle} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1.5px solid ${isComprado?C.success:C.border}`,background:isComprado?C.successLight:C.bg,color:isComprado?C.success:C.textMid,fontWeight:700,fontSize:13,cursor:"pointer"}}>
+          <span style={{...S.checkbox,...(isComprado?S.checkboxDone:{}),width:18,height:18}}>{isComprado&&<svg width="10" height="10" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}</span>
+          {isComprado?"Comprado":"Marcar comprado"}
+        </button>
+      </div>
+
+      {/* Quantidade */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`,marginBottom:12}}>
+        <span style={{fontSize:13,fontWeight:600,color:C.textMid}}>Qtd comprada:</span>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          <button onClick={()=>{const n=Math.max(0,qtdC-1);onUpdate(p.id,{qtdComprada:n,status:n>0?"comprado":"pendente"});}} style={{width:32,height:32,borderRadius:"50%",border:"none",background:C.dangerLight,color:C.danger,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+          <span style={{fontSize:17,fontWeight:800,color:qtdC>0?C.success:C.textLight,minWidth:24,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{qtdC}</span>
+          <button onClick={()=>{const n=qtdC+1;onUpdate(p.id,{qtdComprada:n,status:"comprado"});}} style={{width:32,height:32,borderRadius:"50%",border:"none",background:C.successLight,color:C.success,fontSize:18,fontWeight:700,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>＋</button>
+        </div>
+        {qtdC>0&&<span style={{fontSize:12,color:C.textMid,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdTotal,2)} total</span>}
+      </div>
+
+      {/* Taxa local */}
+      <div style={{marginBottom:14}}>
+        <div style={S.label}>💰 Taxa local</div>
+        <div style={{display:"flex",gap:6}}>
+          {[{v:"isento",l:"Sem taxa",c:"#64748B",bg:C.borderLight},{v:"orlando",l:"Orlando 6,5%",c:C.primary,bg:C.primaryLight},{v:"kissimmee",l:"Kissimmee 7,5%",c:C.purple,bg:C.purpleLight}].map(({v,l,c,bg})=>{
+            const active=(p.localTaxa||"isento")===v;
+            return <button key={v} onClick={()=>onUpdate(p.id,{localTaxa:v})} style={{flex:1,padding:"8px 4px",borderRadius:9,border:`1.5px solid ${active?c:C.border}`,background:active?bg:C.bgCard,color:active?c:C.textLight,fontSize:11,fontWeight:700,cursor:"pointer"}}>{l}</button>;
+          })}
+        </div>
+        {(p.localTaxa==="orlando"||p.localTaxa==="kissimmee")&&<div style={{fontSize:12,color:C.textMid,marginTop:6,fontFamily:"'DM Mono',monospace"}}>US$ {fmtN(usdComTaxa(p),2)} c/ imposto</div>}
+      </div>
+
+      {/* Link do produto */}
+      <div style={{marginBottom:14}}>
+        <div style={S.label}>🔗 Link do produto</div>
+        <input style={{...S.input,marginBottom:6}} type="url" placeholder="https://amazon.com/..." value={link} onChange={e=>setLink(e.target.value)} onBlur={()=>onUpdate(p.id,{link})}/>
+        {p.link&&<a href={p.link} target="_blank" rel="noreferrer" style={{fontSize:13,color:C.primary}}>Abrir link ↗</a>}
+      </div>
+
+      <div style={{display:"flex",gap:8}}>
+        <button style={S.btnOutline} onClick={onEditFull}>✏ Editar tudo</button>
+        <button style={{...S.btnOutline,flex:1}} onClick={onClose}>Fechar</button>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── STATS TAB ────────────────────────────────────────────────────────────────
-function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
+function StatsTab({produtos,gastos,settings,checklist,setChecklist,uid}) {
   const [secao,setSecao]=useState("compras");
   const barColors=[C.primary,C.purple,C.success,C.warning,C.danger,"#06B6D4","#F97316","#EC4899"];
 
@@ -2466,7 +3097,7 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
     <div style={S.page}>
       {/* Sub-tabs */}
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:14}}>
-        {[["compras","🛒 Compras"],["gastos","💸 Gastos"],["checklist","✅ Checklist"]].map(([v,l])=>(
+        {[["compras","🛒 Compras"],["gastos","💸 Gastos"],["checklist","✅ Checklist"],["documentos","📄 Documentos"]].map(([v,l])=>(
           <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:secao===v?C.bgCard:"transparent",color:secao===v?C.primary:C.textMid,boxShadow:secao===v?"0 1px 4px rgba(0,0,0,0.08)":"none",transition:"all 0.2s"}} onClick={()=>setSecao(v)}>{l}</button>
         ))}
       </div>
@@ -2532,6 +3163,9 @@ function StatsTab({produtos,gastos,settings,checklist,setChecklist}) {
 
       {/* ── CHECKLIST ── */}
       {secao==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
+
+      {/* ── DOCUMENTOS ── */}
+      {secao==="documentos"&&<DocumentosTab uid={uid}/>}
 
       {/* ── GASTOS ── */}
       {secao==="gastos"&&(
@@ -2676,7 +3310,7 @@ function BcbRate() {
           {rate&&<div style={{fontSize:11,color:C.textLight}}>atualizado às {lastFetch}</div>}
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8}}>
-          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>}
+          {rate&&<span style={{fontSize:14,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,2)}</span>}
           <button onClick={fetch_} style={{background:C.primaryLight,border:`1px solid ${C.primary}33`,borderRadius:8,padding:"5px 10px",fontSize:12,fontWeight:600,color:C.primary,cursor:"pointer"}}>
             {loading?"...":"↻ BCB"}
           </button>
@@ -2689,7 +3323,7 @@ function BcbRate() {
 
 
 // ─── SETTINGS MODAL ───────────────────────────────────────────────────────────
-function SettingsModal({settings,onSave,onImport,onClose}) {
+function SettingsModal({settings,onSave,onImport,onExport,onClose}) {
   const [s,setS]=useState({...settings});
   const [tab,setTab]=useState("config");
   const [preview,setPreview]=useState(null);
@@ -2723,28 +3357,35 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
         <>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>💵 Dólar pago</div>
           <label style={S.label}>Quanto você pagou pelo dólar (R$)</label>
-          <input style={S.input} type="number" step="0.0001" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
+          <input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="Ex: 5.6200" value={s.dollarPago} onChange={e=>setS(p=>({...p,dollarPago:parseFloat(e.target.value)||0}))}/>
+          <div style={{fontSize:11,color:C.textLight,marginTop:-8,marginBottom:14}}>💡 Atualizado automaticamente pelo Custo Médio Ponderado da aba Câmbio/Dólar, se houver compras registradas.</div>
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10,marginTop:4}}>📊 Taxas (para cálculo do custo real)</div>
           {[["IOF (%)","iof","0.01"],["Spread (%)","spread","0.01"],["Taxa de compra (%)","taxa","0.1"]].map(([l,f,st])=>(
             <div key={f} style={{marginBottom:12}}>
               <label style={S.label}>{l}</label>
-              <input style={S.input} type="number" step={st} value={s[f]} onChange={e=>setS(p=>({...p,[f]:parseFloat(e.target.value)||0}))}/>
+              <input style={S.input} type="number" inputMode="decimal" step={st} value={s[f]} onChange={e=>setS(p=>({...p,[f]:parseFloat(e.target.value)||0}))}/>
             </div>
           ))}
           <div style={{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.6px",marginBottom:10}}>✈ Viagem</div>
           <div style={{marginBottom:12}}>
             <label style={S.label}>Total de dólares que está levando (US$)</label>
-            <input style={S.input} type="number" step="100" value={s.totalDolarViagem} onChange={e=>setS(p=>({...p,totalDolarViagem:parseFloat(e.target.value)||0}))}/>
+            <input style={S.input} type="number" inputMode="decimal" step="100" value={s.totalDolarViagem} onChange={e=>setS(p=>({...p,totalDolarViagem:parseFloat(e.target.value)||0}))}/>
           </div>
           <div style={{marginBottom:12}}>
             <label style={S.label}>Peso máximo da mala (kg)</label>
-            <input style={S.input} type="number" step="0.5" placeholder="23" value={(s.pesoMax/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})} onChange={e=>setS(p=>({...p,pesoMax:Math.round((parseFloat(e.target.value.replace(",","."))||0)*1000)}))}/>
+            <input style={S.input} type="number" inputMode="decimal" step="0.5" placeholder="23" value={(s.pesoMax/1000).toLocaleString("pt-BR",{maximumFractionDigits:1})} onChange={e=>setS(p=>({...p,pesoMax:Math.round((parseFloat(e.target.value.replace(",","."))||0)*1000)}))}/>
           </div>
           <button style={S.btnPrimary} onClick={()=>onSave(s)}>Salvar configurações</button>
         </>
       )}
       {tab==="import"&&(
         <>
+          <div style={{background:"#fff",border:`1px solid ${C.border}`,borderRadius:12,padding:14,marginBottom:14}}>
+            <div style={{fontSize:13,fontWeight:700,color:C.text,marginBottom:8,display:"flex",alignItems:"center",gap:6}}>📊 Backup</div>
+            <div style={{fontSize:12,color:C.textMid,marginBottom:10}}>Exporte seus dados atuais para uma planilha Excel.</div>
+            <button style={S.btnPrimary} onClick={onExport}>📥 Exportar planilha atual</button>
+          </div>
+          <div style={{borderTop:`1px dashed ${C.border}`,margin:"4px 0 14px"}}></div>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{display:"none"}} onChange={e=>processFile(e.target.files[0])}/>
           <div style={{border:`2px dashed ${loading?C.primary:C.border}`,borderRadius:16,textAlign:"center",padding:"28px 20px",cursor:"pointer",background:loading?C.primaryLight:C.bg}} onClick={()=>fileRef.current.click()} onDragOver={e=>e.preventDefault()} onDrop={e=>{e.preventDefault();processFile(e.dataTransfer.files[0]);}}>
             <div style={{fontSize:36,marginBottom:10}}>{loading?"⏳":"📊"}</div>
@@ -2775,9 +3416,9 @@ function SettingsModal({settings,onSave,onImport,onClose}) {
 // ─── PRODUTO FORM ─────────────────────────────────────────────────────────────
 function ProdutoForm({prod,onSave,onClose}) {
   const isL=prod?._legais===true;
-  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipo:"solido",volume:"",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",quantidade:1,_legais:isL};
-  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),dollarPago:(prod.dollarPago||"").toString(),quantidade:prod.quantidade||1,_legais:prod._legais||isL}:empty);
-  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,volume:parseFloat(f.volume)||0,dollarPago:f.dollarPago?parseFloat(f.dollarPago):null,quantidade:parseInt(f.quantidade)||1});}
+  const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipoPeso:"g",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",quantidade:1,_legais:isL};
+  const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),tipoPeso:prod.tipoPeso||"g",dollarPago:(prod.dollarPago||"").toString(),quantidade:prod.quantidade||1,_legais:prod._legais||isL}:empty);
+  function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,tipoPeso:f.tipoPeso||"g",dollarPago:f.dollarPago?parseFloat(f.dollarPago):null,quantidade:parseInt(f.quantidade)||1});}
   return (
     <Modal title={prod?.id?"Editar produto":isL?"✨ Item legal":"Novo produto"} onClose={onClose}>
       <label style={S.label}>Nome *</label>
@@ -2785,23 +3426,43 @@ function ProdutoForm({prod,onSave,onClose}) {
       <label style={S.label}>Quantidade</label>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}>
         <button onClick={()=>setF(p=>({...p,quantidade:Math.max(1,(parseInt(p.quantidade)||1)-1)}))} style={{width:36,height:36,borderRadius:9,border:`1px solid ${C.border}`,background:C.bg,fontSize:18,cursor:"pointer",color:C.text,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>−</button>
-        <input style={{...S.input,marginBottom:0,textAlign:"center",fontWeight:700,fontSize:16}} type="number" min="1" value={f.quantidade||1} onChange={e=>setF(p=>({...p,quantidade:Math.max(1,parseInt(e.target.value)||1)}))}/>
+        <input style={{...S.input,marginBottom:0,textAlign:"center",fontWeight:700,fontSize:16}} type="number" inputMode="numeric" min="1" value={f.quantidade||1} onChange={e=>setF(p=>({...p,quantidade:Math.max(1,parseInt(e.target.value)||1)}))}/>
         <button onClick={()=>setF(p=>({...p,quantidade:(parseInt(p.quantidade)||1)+1}))} style={{width:36,height:36,borderRadius:9,border:`1px solid ${C.border}`,background:C.bg,fontSize:18,cursor:"pointer",color:C.text,flexShrink:0,fontFamily:"'Inter',sans-serif"}}>＋</button>
       </div>
       <label style={S.label}>Loja</label>
       <input style={S.input} list="lojas-list" placeholder="Digite ou escolha uma loja..." value={f.loja} onChange={e=>setF(p=>({...p,loja:e.target.value}))}/>
       <datalist id="lojas-list">{LOJAS_SUGESTOES.map(l=><option key={l} value={l}/>)}</datalist>
       <label style={S.label}>Preço USD *</label>
-      <input style={S.input} type="number" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
-      <label style={S.label}>Tipo</label>
-      <div style={{display:"flex",gap:8,marginBottom:14}}>{[["solido","📦 Sólido"],["liquido","💧 Líquido"]].map(([v,l])=><button key={v} style={{...S.chipSel,flex:1,...(f.tipo===v?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,tipo:v}))}>{l}</button>)}</div>
-      {f.tipo==="solido"?<><label style={S.label}>Peso (gramas)</label><input style={S.input} type="number" placeholder="Ex: 250" value={f.peso} onChange={e=>setF(p=>({...p,peso:e.target.value}))}/>{f.peso&&<div style={{fontSize:12,color:C.textLight,marginTop:-8,marginBottom:12}}>= {((parseFloat(f.peso)||0)/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}</>:<><label style={S.label}>Volume (oz)</label><input style={S.input} type="number" step="0.1" placeholder="Ex: 3.4" value={f.volume} onChange={e=>setF(p=>({...p,volume:e.target.value}))}/>{f.volume&&<div style={{fontSize:12,color:C.textLight,marginTop:-8,marginBottom:12}}>= {((parseFloat(f.volume)||0)*28.3495/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}</>}
+      <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
+      <div style={{ marginBottom: 14 }}>
+        <label style={S.label}>Peso / Volume</label>
+        <div style={{ display: "flex", gap: 8 }}>
+          <input
+            style={{ ...S.input, marginBottom: 0, flex: 1 }}
+            type="number"
+            inputMode="decimal"
+            placeholder="0"
+            value={f.peso}
+            onChange={e=>setF(p=>({...p,peso:e.target.value}))}
+          />
+          <select
+            value={f.tipoPeso || "g"}
+            onChange={e=>setF(p=>({...p,tipoPeso:e.target.value}))}
+            style={{ background:C.bg, border:`1px solid ${C.border}`, borderRadius:9, padding:"0 10px", color:C.text, fontSize:14, outline:"none", fontFamily:"'Inter',sans-serif" }}
+          >
+            <option value="g">Peso G</option>
+            <option value="oz_peso">Peso Oz</option>
+            <option value="oz_liquido">Líquido Oz</option>
+          </select>
+        </div>
+        {f.peso&&<div style={{fontSize:12,color:C.textLight,marginTop:6}}>= {(pesoGramas({peso:f.peso,tipoPeso:f.tipoPeso||"g"})/1000).toLocaleString("pt-BR",{minimumFractionDigits:3})} kg</div>}
+      </div>
       {!isL&&(<>
         <label style={S.label}>Prioridade</label>
         <div style={{display:"flex",gap:8,marginBottom:14}}>{PRIORIDADES.map(pr=><button key={pr} style={{...S.chipSel,flex:1,...(f.prioridade===pr?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,prioridade:pr}))}>{pr}</button>)}</div>
         <label style={S.label}>Status</label>
         <div style={{display:"flex",gap:8,marginBottom:14}}>{[["pendente","⏳ Pendente"],["comprado","✅ Comprado"]].map(([v,l])=><button key={v} style={{...S.chipSel,flex:1,...(f.status===v?S.chipSelActive:{})}} onClick={()=>setF(p=>({...p,status:v}))}>{l}</button>)}</div>
-        {f.status==="comprado"&&<><label style={S.label}>Dólar pago (R$)</label><input style={S.input} type="number" step="0.01" placeholder="5.71" value={f.dollarPago} onChange={e=>setF(p=>({...p,dollarPago:e.target.value}))}/></>}
+        {f.status==="comprado"&&<><label style={S.label}>Dólar pago (R$)</label><input style={S.input} type="number" inputMode="decimal" step="0.01" placeholder="5.71" value={f.dollarPago} onChange={e=>setF(p=>({...p,dollarPago:e.target.value}))}/></>}
       </>)}
       <label style={S.label}>Link (para buscar imagem)</label>
       <input style={S.input} type="url" placeholder="https://amazon.com/..." value={f.link} onChange={e=>setF(p=>({...p,link:e.target.value}))}/>
@@ -2823,8 +3484,37 @@ function Modal({title,onClose,children}) {
     </div>
   );
 }
-function Empty({text}) {
-  return <div style={{textAlign:"center",padding:"40px 0"}}><div style={{fontSize:36,marginBottom:10}}>📭</div><div style={{fontSize:13,color:C.textLight,fontWeight:500}}>{text}</div></div>;
+function SyncIndicator({status}) {
+  const [online,setOnline]=useState(typeof navigator!=="undefined"?navigator.onLine:true);
+  useEffect(()=>{
+    const goOnline=()=>setOnline(true), goOffline=()=>setOnline(false);
+    window.addEventListener("online",goOnline);
+    window.addEventListener("offline",goOffline);
+    return ()=>{ window.removeEventListener("online",goOnline); window.removeEventListener("offline",goOffline); };
+  },[]);
+
+  let icon="☁️", label="Sincronizado", color=C.success;
+  if (!online) { icon="📡"; label="Offline"; color=C.textLight; }
+  else if (status==="saving") { icon="⏳"; label="Salvando..."; color=C.textMid; }
+  else if (status==="error") { icon="⚠️"; label="Erro ao salvar"; color=C.danger; }
+  else if (status==="idle") { icon="☁️"; label="Sincronizado"; color=C.textLight; }
+
+  return (
+    <div style={{display:"flex",alignItems:"center",gap:4,fontSize:11,fontWeight:600,color,padding:"4px 8px",borderRadius:999,background:C.borderLight,flexShrink:0,whiteSpace:"nowrap"}} title={label}>
+      <span style={{fontSize:12}}>{icon}</span>
+      <span className="sync-label">{label}</span>
+    </div>
+  );
+}
+
+function Empty({text,actionLabel,onAction}) {
+  return (
+    <div style={{textAlign:"center",padding:"40px 0"}}>
+      <div style={{fontSize:36,marginBottom:10}}>📭</div>
+      <div style={{fontSize:13,color:C.textLight,fontWeight:500,marginBottom:onAction?16:0}}>{text}</div>
+      {onAction&&<button style={{...S.btnPrimary,display:"inline-flex",width:"auto",padding:"10px 20px"}} onClick={onAction}>{actionLabel}</button>}
+    </div>
+  );
 }
 
 // ─── STYLES ───────────────────────────────────────────────────────────────────
@@ -2881,6 +3571,7 @@ const CSS=`
   .notif-error{background:#FEF2F2;border:1px solid #EF444433;color:#DC2626;}
   @keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
   .galeria-card:active{transform:scale(0.98);}
+  @media (max-width: 420px){ .sync-label{display:none;} }
   .spinner{width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:#2563EB;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
   @keyframes spin{to{transform:rotate(360deg);}}
 `;
