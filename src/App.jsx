@@ -2795,6 +2795,9 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
   const brl=usdComTaxa(p)*settings.dollarPago;
   const brlPago=p.dollarPago?calcBRLPago(usdUnit,settings,p.dollarPago):null;
   const peso=prodPeso(p);
+  const qtdCad=prodQtdCad(p);
+  const usdTotalPlanejado=usdComTaxa(p)*qtdCad;
+  const brlTotalPlanejado=usdTotalPlanejado*settings.dollarPago;
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
   const pc=prioColors[p.prioridade]||prioColors["Média"];
   return (
@@ -2810,6 +2813,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
             <div style={{textAlign:"right",flexShrink:0}}>
               <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,0)}</div>
+              {qtdCad>1&&<div style={{fontSize:11,color:C.primary,fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>×{qtdCad} = {fmtUSD(usdTotalPlanejado,2)}</div>}
             </div>
           </div>
           <div style={{display:"flex",gap:5,marginTop:6,flexWrap:"wrap"}}>
@@ -2848,7 +2852,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
       </div>}
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[{label:"BRL previsto",value:`${fmtBRL(brl,2)}`},...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtdC>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD total (×${qtdC})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
+          {[{label:"BRL previsto (unit.)",value:`${fmtBRL(brl,2)}`},...(qtdCad>1?[{label:"Qtd planejada",value:`${qtdCad}x`,color:C.primary},{label:"USD total planejado",value:fmtUSD(usdTotalPlanejado,2),color:C.primary},{label:"BRL total planejado",value:fmtBRL(brlTotalPlanejado,2),color:C.text}]:[]),...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtdC>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD comprado (×${qtdC})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
               <span style={{fontSize:13,color:C.textMid}}>{label}</span>
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
@@ -2988,6 +2992,7 @@ function GaleriaDetailModal({p,settings,isLegais,onClose,onPrev,onNext,onToggle,
         <div>
           <div style={{fontSize:20,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
           <div style={{fontSize:12,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,2)}</div>
+          {prodQtdCad(p)>1&&<div style={{fontSize:12,color:C.primary,fontWeight:700,fontFamily:"'DM Mono',monospace",marginTop:2}}>×{prodQtdCad(p)} = {fmtUSD(usdComTaxa(p)*prodQtdCad(p),2)}</div>}
         </div>
         <button onClick={onToggle} style={{display:"flex",alignItems:"center",gap:8,padding:"9px 14px",borderRadius:10,border:`1.5px solid ${isComprado?C.success:C.border}`,background:isComprado?C.successLight:C.bg,color:isComprado?C.success:C.textMid,fontWeight:700,fontSize:13,cursor:"pointer"}}>
           <span style={{...S.checkbox,...(isComprado?S.checkboxDone:{}),width:18,height:18}}>{isComprado&&<svg width="10" height="10" viewBox="0 0 12 12"><polyline points="2,6 5,9 10,3" stroke="white" strokeWidth="2" fill="none" strokeLinecap="round"/></svg>}</span>
@@ -3434,6 +3439,11 @@ function ProdutoForm({prod,onSave,onClose}) {
       <datalist id="lojas-list">{LOJAS_SUGESTOES.map(l=><option key={l} value={l}/>)}</datalist>
       <label style={S.label}>Preço USD *</label>
       <input style={S.input} type="number" inputMode="decimal" placeholder="Ex: 199" value={f.usd} onChange={e=>setF(p=>({...p,usd:e.target.value}))}/>
+      {f.usd&&parseInt(f.quantidade||1)>1&&(
+        <div style={{background:C.primaryLight,borderRadius:10,padding:"8px 12px",fontSize:13,color:C.primary,fontWeight:600,marginTop:-6,marginBottom:14}}>
+          Total planejado: {fmtUSD((parseFloat(f.usd)||0)*(parseInt(f.quantidade)||1),2)} ({fmtUSD(f.usd,2)} × {f.quantidade})
+        </div>
+      )}
       <div style={{ marginBottom: 14 }}>
         <label style={S.label}>Peso / Volume</label>
         <div style={{ display: "flex", gap: 8 }}>
