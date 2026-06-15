@@ -652,7 +652,10 @@ DOLLAR TREE:
     const pesoTotal=produtos.reduce((a,p)=>a+prodPeso(p),0);
     const valorTotalUSD=produtos.reduce((a,p)=>a+(parseFloat(p.usd)||0)*prodQtdCad(p),0);
     const valorTotalBRL=produtos.reduce((a,p)=>a+calcBRLProduto(p,settings),0);
-    const valorGasto=comprados.reduce((a,p)=>a+(p.dollarPago?calcBRLPago(p.usd,settings,p.dollarPago):calcBRL(p.usd,settings)),0);
+    const valorGasto=comprados.reduce((a,p)=>{
+      const usdReal=usdComTaxa(p)*(parseInt(p.qtdComprada)||1);
+      return a+(p.dollarPago?calcBRLPago(usdReal,settings,p.dollarPago):calcBRL(usdReal,settings));
+    },0);
     let totalMeusGastosUSD=0;
     gastos.forEach(g=>{
       // Fallback para produto pai se usd=0 (gastos legados criados com bug)
@@ -2284,10 +2287,12 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
   const [expanded,setExpanded]=useState(false);
   const isComprado=p.status==="comprado";
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
+  const qtdCad=prodQtdCad(p); // quantidade planejada/cadastrada
   const usdUnit=parseFloat(p.usd)||0;
   const usdTotal=usdComTaxa(p)*Math.max(1,qtdC);
-  const brl=usdUnit*calcDolarAjustado(settings);
-  const brlPago=p.dollarPago?calcBRLPago(usdUnit,settings,p.dollarPago):null;
+  const usdPlanejado=usdUnit*qtdCad; // total planejado (qtd cadastrada × unitário)
+  const brl=usdPlanejado*calcDolarAjustado(settings);
+  const brlPago=p.dollarPago?calcBRLPago(usdPlanejado,settings,p.dollarPago):null;
   const peso=prodPeso(p);
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
   const pc=prioColors[p.prioridade]||prioColors["Média"];
@@ -2302,7 +2307,9 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
           <div style={{display:"flex",justifyContent:"space-between",gap:8}}>
             <div style={{fontWeight:600,fontSize:14,color:p.status==="comprado"?C.textLight:C.text,textDecoration:p.status==="comprado"?"line-through":"none",lineHeight:1.3,flex:1}}>{p.nome}</div>
             <div style={{textAlign:"right",flexShrink:0}}>
-              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(usdUnit,2)}</div>
+              <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>
+                {qtdCad>1?<>{fmtUSD(usdPlanejado,2)}<span style={{fontSize:10,color:C.textLight,fontWeight:600}}> ({fmtUSD(usdUnit,2)}×{qtdCad})</span></>:fmtUSD(usdUnit,2)}
+              </div>
               <div style={{fontSize:11,color:C.textLight,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(brl,0)}</div>
             </div>
           </div>
