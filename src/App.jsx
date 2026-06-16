@@ -28,18 +28,22 @@ const normalizeCloudState = data => ({
 
 async function saveCloudState(userDocRef, state, { force=false } = {}) {
   try {
-    // TRAVA DE SEGURANÇA: só bloqueia se AMBAS as listas estiverem vazias
-    // (evita bloquear quando todos os produtos foram movidos para itens legais ou vice-versa)
     if (!force && (!state.produtos || state.produtos.length === 0) && (!state.itensLegais || state.itensLegais.length === 0)) {
       console.warn("⚠️ [Segurança] Tentativa de salvar listas totalmente vazias abortada. Nuvem protegida.");
       return;
     }
+    console.log("💾 [SAVE] Salvando na nuvem:", {
+      produtos: state.produtos?.length,
+      itensLegais: state.itensLegais?.length,
+      timestamp: new Date().toISOString()
+    });
     await setDoc(userDocRef, {
       ...state,
       updatedAt: serverTimestamp(),
     });
+    console.log("✅ [SAVE] Salvo com sucesso!");
   } catch (error) {
-    console.error("Erro ao salvar dados na nuvem:", error);
+    console.error("❌ [SAVE] Erro ao salvar:", error);
   }
 }
 
@@ -512,6 +516,11 @@ DOLLAR TREE:
     // Força leitura do servidor na inicialização (ignora cache local)
     // para garantir que o F5 sempre traz o estado real da nuvem
     getDoc(userDocRef).then(async (snap) => {
+      console.log("📥 [INIT] getDoc do servidor:", snap.exists() ? {
+        produtos: snap.data()?.produtos?.length,
+        itensLegais: snap.data()?.itensLegais?.length,
+        updatedAt: snap.data()?.updatedAt?.toDate?.()
+      } : "não existe");
       if (!snap.exists()) {
         skipNextCloudSave.current = true;
         await saveCloudState(userDocRef, {
@@ -565,6 +574,7 @@ DOLLAR TREE:
       // Ignora snapshots que ainda têm writes pendentes (escrita local ainda confirmando)
       // ou que vieram do cache local — só processa quando o servidor confirmar
       if (snap.metadata.hasPendingWrites) {
+        console.log("⏳ [SNAP] Ignorado (hasPendingWrites)");
         setCloudReady(true);
         return;
       }
@@ -572,10 +582,16 @@ DOLLAR TREE:
       const cloudState = normalizeCloudState(snap.data());
       // Se foi o próprio app que salvou, não sobrescrever o state local
       if (skipNextSnapshot.current) {
+        console.log("⏭ [SNAP] Ignorado (skipNextSnapshot) - fromCache:", snap.metadata.fromCache);
         skipNextSnapshot.current = false;
         setCloudReady(true);
         return;
       }
+      console.log("📡 [SNAP] Aplicando snapshot externo:", {
+        produtos: cloudState.produtos?.length,
+        itensLegais: cloudState.itensLegais?.length,
+        fromCache: snap.metadata.fromCache
+      });
       skipNextCloudSave.current = true;
       setSettings(cloudState.settings);
       setProdutos(cloudState.produtos);
