@@ -26,6 +26,20 @@ const normalizeCloudState = data => ({
   comprasDolar: Array.isArray(data?.comprasDolar) ? data.comprasDolar : [],
 });
 
+// Remove todos os campos com valor `undefined` recursivamente
+// (Firestore não aceita undefined — só null, strings, números, arrays, objetos)
+function sanitize(obj) {
+  if (Array.isArray(obj)) return obj.map(sanitize);
+  if (obj !== null && typeof obj === 'object') {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, sanitize(v)])
+    );
+  }
+  return obj;
+}
+
 async function saveCloudState(userDocRef, state, { force=false } = {}) {
   try {
     if (!force && (!state.produtos || state.produtos.length === 0) && (!state.itensLegais || state.itensLegais.length === 0)) {
@@ -38,7 +52,7 @@ async function saveCloudState(userDocRef, state, { force=false } = {}) {
       timestamp: new Date().toISOString()
     });
     await setDoc(userDocRef, {
-      ...state,
+      ...sanitize(state),
       updatedAt: serverTimestamp(),
     });
     console.log("✅ [SAVE] Salvo com sucesso!");
