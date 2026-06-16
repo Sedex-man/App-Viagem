@@ -792,37 +792,17 @@ DOLLAR TREE:
   }
 
   function moveToList(item) {
-    const newProd = {...item,_legais:undefined,status:"pendente",prioridade:"Média",id:Date.now()};
-    const novosProdutos = [...produtos, newProd];
-    const novosLegais = itensLegais.filter(p=>p.id!==item.id);
-    setProdutos(novosProdutos);
-    setItensLegais(novosLegais);
+    const newProd = {...item, _legais: undefined, status: "pendente", prioridade: "Média", id: Date.now()};
+    setProdutos(prev => [...prev, newProd]);
+    setItensLegais(prev => prev.filter(p => p.id !== item.id));
     notify("Movido para lista!");
-    // Salva imediatamente na nuvem sem esperar o debounce
-    if (userDocRef) {
-      skipNextCloudSave.current = true;
-      skipNextSnapshot.current = true;
-      setSyncStatus("saving");
-      saveCloudState(userDocRef, { settings, produtos: novosProdutos, itensLegais: novosLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
-        .then(()=>setSyncStatus("synced")).catch(()=>setSyncStatus("error"));
-    }
   }
 
   function moveToLegais(item) {
-    const newLegal = {...item,_legais:undefined,status:"pendente",id:Date.now()};
-    const novosProdutos = produtos.filter(p=>p.id!==item.id);
-    const novosLegais = [...itensLegais, newLegal];
-    setProdutos(novosProdutos);
-    setItensLegais(novosLegais);
+    const newLegal = {...item, _legais: undefined, status: "pendente", id: Date.now()};
+    setItensLegais(prev => [...prev, newLegal]);
+    setProdutos(prev => prev.filter(p => p.id !== item.id));
     notify("Movido para itens legais!");
-    // Salva imediatamente na nuvem sem esperar o debounce
-    if (userDocRef) {
-      skipNextCloudSave.current = true;
-      skipNextSnapshot.current = true;
-      setSyncStatus("saving");
-      saveCloudState(userDocRef, { settings, produtos: novosProdutos, itensLegais: novosLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
-        .then(()=>setSyncStatus("synced")).catch(()=>setSyncStatus("error"));
-    }
   }
 
   function handleImport(compras,legais,parcelasImp=[]) {
