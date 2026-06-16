@@ -570,8 +570,8 @@ DOLLAR TREE:
       return;
     }
 
-    setSyncStatus("saving");
     const timer = setTimeout(() => {
+      setSyncStatus("saving");
       skipNextSnapshot.current = true;
       saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
         .then(() => setSyncStatus("synced"))
@@ -785,13 +785,37 @@ DOLLAR TREE:
   }
 
   function moveToList(item) {
-    setProdutos(ps=>[...ps,{...item,_legais:undefined,status:"pendente",prioridade:"Média",id:Date.now()}]);
-    setItensLegais(ps=>ps.filter(p=>p.id!==item.id)); notify("Movido para lista!");
+    const newProd = {...item,_legais:undefined,status:"pendente",prioridade:"Média",id:Date.now()};
+    const novosProdutos = [...produtos, newProd];
+    const novosLegais = itensLegais.filter(p=>p.id!==item.id);
+    setProdutos(novosProdutos);
+    setItensLegais(novosLegais);
+    notify("Movido para lista!");
+    // Salva imediatamente na nuvem sem esperar o debounce
+    if (userDocRef) {
+      skipNextCloudSave.current = true;
+      skipNextSnapshot.current = true;
+      setSyncStatus("saving");
+      saveCloudState(userDocRef, { settings, produtos: novosProdutos, itensLegais: novosLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
+        .then(()=>setSyncStatus("synced")).catch(()=>setSyncStatus("error"));
+    }
   }
 
   function moveToLegais(item) {
-    setItensLegais(ps=>[...ps,{...item,_legais:undefined,status:"pendente",id:Date.now()}]);
-    setProdutos(ps=>ps.filter(p=>p.id!==item.id)); notify("Movido para itens legais!");
+    const newLegal = {...item,_legais:undefined,status:"pendente",id:Date.now()};
+    const novosProdutos = produtos.filter(p=>p.id!==item.id);
+    const novosLegais = [...itensLegais, newLegal];
+    setProdutos(novosProdutos);
+    setItensLegais(novosLegais);
+    notify("Movido para itens legais!");
+    // Salva imediatamente na nuvem sem esperar o debounce
+    if (userDocRef) {
+      skipNextCloudSave.current = true;
+      skipNextSnapshot.current = true;
+      setSyncStatus("saving");
+      saveCloudState(userDocRef, { settings, produtos: novosProdutos, itensLegais: novosLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
+        .then(()=>setSyncStatus("synced")).catch(()=>setSyncStatus("error"));
+    }
   }
 
   function handleImport(compras,legais,parcelasImp=[]) {
