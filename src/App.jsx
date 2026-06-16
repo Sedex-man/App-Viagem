@@ -510,7 +510,7 @@ DOLLAR TREE:
   useEffect(() => {
     if (!userDocRef || !user) return;
 
-    const unsubscribe = onSnapshot(userDocRef, async (snap) => {
+    const unsubscribe = onSnapshot(userDocRef, { includeMetadataChanges: true }, async (snap) => {
       if (!snap.exists()) {
         skipNextCloudSave.current = true;
         await saveCloudState(userDocRef, {
@@ -531,6 +531,13 @@ DOLLAR TREE:
         setPlanejamento({ dataInicio:"", dataFim:"", eventos:[] });
         setChecklist([]);
         setComprasDolar([]);
+        setCloudReady(true);
+        return;
+      }
+
+      // Ignora snapshots que ainda têm writes pendentes (escrita local ainda confirmando)
+      // ou que vieram do cache local — só processa quando o servidor confirmar
+      if (snap.metadata.hasPendingWrites) {
         setCloudReady(true);
         return;
       }
