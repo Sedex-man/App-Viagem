@@ -3,7 +3,7 @@ import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
 import { salvarDocumento, ouvirDocumentos, obterArquivo, removerDocumento } from './docStorage';
 import { db } from "./firebase";
-import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, onSnapshot, setDoc, serverTimestamp, getDoc } from "firebase/firestore";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, setPersistence, browserLocalPersistence } from "firebase/auth";
 
 
@@ -28,17 +28,16 @@ const normalizeCloudState = data => ({
 
 async function saveCloudState(userDocRef, state, { force=false } = {}) {
   try {
-    // TRAVA DE SEGURANÇA: se a lista de produtos estiver vazia, cancela o salvamento
-    // para não sobrescrever dados reais com um estado vazio (ex: carregamento ainda em curso).
-    // `force` é usado apenas na inicialização de um usuário novo (documento ainda não existe).
-    if (!force && (!state.produtos || state.produtos.length === 0)) {
-      console.warn("⚠️ [Segurança] Tentativa de salvar lista de produtos vazia abortada. Nuvem protegida.");
+    // TRAVA DE SEGURANÇA: só bloqueia se AMBAS as listas estiverem vazias
+    // (evita bloquear quando todos os produtos foram movidos para itens legais ou vice-versa)
+    if (!force && (!state.produtos || state.produtos.length === 0) && (!state.itensLegais || state.itensLegais.length === 0)) {
+      console.warn("⚠️ [Segurança] Tentativa de salvar listas totalmente vazias abortada. Nuvem protegida.");
       return;
     }
     await setDoc(userDocRef, {
       ...state,
       updatedAt: serverTimestamp(),
-    }, { merge: true });
+    });
   } catch (error) {
     console.error("Erro ao salvar dados na nuvem:", error);
   }
@@ -510,6 +509,34 @@ DOLLAR TREE:
   useEffect(() => {
     if (!userDocRef || !user) return;
 
+    // Força leitura do servidor na inicialização (ignora cache local)
+    // para garantir que o F5 sempre traz o estado real da nuvem
+    getDoc(userDocRef).then(async (snap) => {
+      if (!snap.exists()) {
+        skipNextCloudSave.current = true;
+        await saveCloudState(userDocRef, {
+          settings: INITIAL_SETTINGS, produtos: SAMPLE_PRODUTOS, itensLegais: [],
+          gastos: [], parcelas: [], planejamento: { dataInicio:"", dataFim:"", eventos:[] },
+          checklist: [], comprasDolar: [],
+        }, { force: true });
+        setSettings(INITIAL_SETTINGS); setProdutos(SAMPLE_PRODUTOS); setItensLegais([]);
+        setGastos([]); setParcelas([]); setPlanejamento({ dataInicio:"", dataFim:"", eventos:[] });
+        setChecklist([]); setComprasDolar([]);
+      } else {
+        const cloudState = normalizeCloudState(snap.data());
+        skipNextCloudSave.current = true;
+        setSettings(cloudState.settings); setProdutos(cloudState.produtos);
+        setItensLegais(cloudState.itensLegais); setGastos(cloudState.gastos);
+        setParcelas(cloudState.parcelas || []); setPlanejamento(cloudState.planejamento || { dataInicio:"", dataFim:"", eventos:[] });
+        setChecklist(cloudState.checklist || []); setComprasDolar(cloudState.comprasDolar || []);
+        setAnotacoes(cloudState.anotacoes || anotacoes);
+      }
+      setCloudReady(true);
+    }).catch(err => {
+      console.error("Erro ao carregar do servidor:", err);
+      setCloudReady(true); // fallback: continua com cache local
+    });
+
     const unsubscribe = onSnapshot(userDocRef, { includeMetadataChanges: true }, async (snap) => {
       if (!snap.exists()) {
         skipNextCloudSave.current = true;
@@ -569,7 +596,7 @@ DOLLAR TREE:
     return () => unsubscribe();
   }, [userDocRef, user]);
 
-  // Salva alterações locais direto no Firestore. Não usa mais LocalStorage nem ID pela URL.
+  // Salva alterações locais direto no Firestore.
   useEffect(() => {
     if (!userDocRef || !cloudReady) return;
     if (skipNextCloudSave.current) {
@@ -577,9 +604,12 @@ DOLLAR TREE:
       return;
     }
 
+    // Marca imediatamente que o próximo snapshot é nosso — evita
+    // que confirmações de writes anteriores sobrescrevam o estado atual
+    skipNextSnapshot.current = true;
+
     const timer = setTimeout(() => {
       setSyncStatus("saving");
-      skipNextSnapshot.current = true;
       saveCloudState(userDocRef, { settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes })
         .then(() => setSyncStatus("synced"))
         .catch((error) => {
@@ -590,7 +620,11 @@ DOLLAR TREE:
         });
     }, 350);
 
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // Se o timer foi cancelado (nova mudança chegou antes dos 350ms),
+      // mantém skipNextSnapshot true — será reutilizado pelo próximo ciclo
+    };
   }, [settings, produtos, itensLegais, gastos, parcelas, planejamento, checklist, comprasDolar, anotacoes, cloudReady, userDocRef]);
 
   // Mantém "Dólar pago" (cotação padrão) sincronizado com o Custo Médio Ponderado
