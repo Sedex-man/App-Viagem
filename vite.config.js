@@ -1,7 +1,6 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
-
 export default defineConfig({
   plugins: [
     react(),
@@ -13,6 +12,9 @@ export default defineConfig({
         skipWaiting: true,
         globPatterns: ['**/*.{js,css,html,ico,png,svg,webmanifest}'],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Deixa passar sem interceptar qualquer requisição do Firebase/Google APIs
+        // O Firestore usa WebSockets/streaming que o Workbox não consegue cachear
+        navigateFallbackDenylist: [/^\/api/],
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
@@ -32,25 +34,24 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] }
             }
           },
+          // Firestore e Firebase Auth: NetworkOnly — o SDK do Firebase gerencia
+          // o próprio cache offline via persistentLocalCache (IndexedDB).
+          // Tentar cachear via Workbox quebra as conexões WebSocket/streaming.
           {
             urlPattern: /^https:\/\/firestore\.googleapis\.com\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'firestore-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 20, maxAgeSeconds: 60*60*24 },
-              cacheableResponse: { statuses: [0, 200] }
-            }
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: /^https:\/\/firebase\.googleapis\.com\/.*/i,
+            handler: 'NetworkOnly',
           },
           {
             urlPattern: /^https:\/\/identitytoolkit\.googleapis\.com\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'firebase-auth-cache',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 5, maxAgeSeconds: 60*60 },
-              cacheableResponse: { statuses: [0, 200] }
-            }
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: /^https:\/\/securetoken\.googleapis\.com\/.*/i,
+            handler: 'NetworkOnly',
           },
           // APIs de cotação — NetworkOnly (sem cache, evita erro offline)
           {
@@ -59,6 +60,10 @@ export default defineConfig({
           },
           {
             urlPattern: /^https:\/\/olinda\.bcb\.gov\.br\/.*/i,
+            handler: 'NetworkOnly',
+          },
+          {
+            urlPattern: /^https:\/\/corsproxy\.io\/.*/i,
             handler: 'NetworkOnly',
           },
         ]
