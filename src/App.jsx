@@ -118,10 +118,17 @@ const prodQtdCad = p => Math.max(1, parseInt(p.quantidade) || 1);
 const prodUSD = p => (parseFloat(p.usd) || 0) * Math.max(1, parseInt(p.qtdComprada) || (p.status === "comprado" ? 1 : 0));
 // Peso total considerando quantidade cadastrada
 const prodPeso = p => pesoGramas(p) * prodQtdCad(p);
-// USD planeado (usa quantidade cadastrada, independente do status)
-const prodUSDPlanejado = p => (parseFloat(p.usd) || 0) * prodQtdCad(p);
-// BRL planeado (usa quantidade cadastrada, independente do status)
-const calcBRLProdutoPlanejado = (p, s) => usdComTaxa(p) * prodQtdCad(p) * s.dollarPago;
+// USD planeado (usa quantidade cadastrada + taxa local para estimativa realista)
+// Usa Orlando 6.5% como base se isento, para dar uma base conservadora de planejamento
+const prodUSDPlanejado = p => {
+  const taxaEfetiva = taxaLocal(p) > 0 ? taxaLocal(p) : 0.065; // Orlando como base
+  return (parseFloat(p.usd) || 0) * (1 + taxaEfetiva) * prodQtdCad(p);
+};
+// BRL planeado (usa quantidade cadastrada + taxa local + dólar médio)
+const calcBRLProdutoPlanejado = (p, s) => {
+  const taxaEfetiva = taxaLocal(p) > 0 ? taxaLocal(p) : 0.065;
+  return (parseFloat(p.usd) || 0) * (1 + taxaEfetiva) * prodQtdCad(p) * s.dollarPago;
+};
 
 // ─── FORMATAÇÃO ─────────────────────────────────────────────────────────────
 // Formata número com vírgula como separador decimal (padrão pt-BR)
@@ -618,15 +625,21 @@ DOLLAR TREE:
     setProdutos(ps => ps.map(p => {
       if (p.id !== id) return p;
       const newStatus = p.status === "comprado" ? "pendente" : "comprado";
-      const novaQtd = newStatus === "comprado" ? 1 : 0;
+      // Usa quantidade planejada como base ao marcar comprado
+      const novaQtd = newStatus === "comprado" ? (parseInt(p.quantidade) || 1) : 0;
+      // Preserva taxa local já definida no produto
+      const taxaAtual = p.localTaxa || "isento";
       if (newStatus === "comprado") {
         setGastos(gs => {
-          if (gs.some(g => g.produtoId === id)) return gs;
+          if (gs.some(g => g.produtoId === id)) {
+            // Se gasto já existe (ex: desmarcado e remarcado), atualiza localTaxa e qtd
+            return gs.map(g => g.produtoId === id ? {...g, qtdComprada: novaQtd, localTaxa: taxaAtual} : g);
+          }
           return [...gs, {
             id: `prod_${id}`, produtoId: id, descricao: p.nome, loja: p.loja || "Não especificada",
             usd: parseFloat(p.usd) || 0,
             qtdComprada: novaQtd,
-            localTaxa: "isento",
+            localTaxa: taxaAtual,
             dolarPago: p.dollarPago || settings.dollarPago,
             brl: null, imagem: p.imagem || "",
             categoria: p.categoria || "🛍 Compras", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
@@ -635,7 +648,7 @@ DOLLAR TREE:
       } else {
         setGastos(gs => gs.filter(g => g.produtoId !== id));
       }
-      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: p.localTaxa || "isento"};
+      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: taxaAtual};
     }));
   }
 
@@ -643,15 +656,18 @@ DOLLAR TREE:
     setItensLegais(ps => ps.map(p => {
       if (p.id !== id) return p;
       const newStatus = p.status === "comprado" ? "pendente" : "comprado";
-      const novaQtd = newStatus === "comprado" ? (parseInt(p.qtdComprada) || 1) : 0;
+      const novaQtd = newStatus === "comprado" ? (parseInt(p.quantidade) || 1) : 0;
+      const taxaAtual = p.localTaxa || "isento";
       if (newStatus === "comprado") {
         setGastos(gs => {
-          if (gs.some(g => g.produtoId === id)) return gs;
+          if (gs.some(g => g.produtoId === id)) {
+            return gs.map(g => g.produtoId === id ? {...g, qtdComprada: novaQtd, localTaxa: taxaAtual} : g);
+          }
           return [...gs, {
             id: `legal_${id}`, produtoId: id, descricao: p.nome, loja: p.loja || "Não especificada",
             usd: parseFloat(p.usd) || 0,
             qtdComprada: novaQtd,
-            localTaxa: p.localTaxa || "isento",
+            localTaxa: taxaAtual,
             dolarPago: p.dollarPago || settings.dollarPago,
             brl: null, imagem: p.imagem || "",
             categoria: "⚖️ Itens Legais", divisao: [], data: new Date().toLocaleDateString("pt-BR"), tipo: "produto"
@@ -660,7 +676,7 @@ DOLLAR TREE:
       } else {
         setGastos(gs => gs.filter(g => g.produtoId !== id));
       }
-      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: p.localTaxa || "isento"};
+      return {...p, status: newStatus, qtdComprada: novaQtd, localTaxa: taxaAtual};
     }));
   }
 
@@ -684,6 +700,18 @@ DOLLAR TREE:
     try { localStorage.removeItem(`img_perm_${prod.id}`); } catch(e) {}
     if(prod._legais){ prod.id?setItensLegais(ps=>ps.map(p=>p.id===prod.id?prod:p)):setItensLegais(ps=>[...ps,{...prod,id:Date.now()}]); }
     else { prod.id?setProdutos(ps=>ps.map(p=>p.id===prod.id?prod:p)):setProdutos(ps=>[...ps,{...prod,id:Date.now()}]); }
+    // Sincronizar gasto correspondente se o produto já estava comprado
+    if (prod.id && prod.status === "comprado") {
+      setGastos(gs => gs.map(g => g.produtoId === prod.id ? {
+        ...g,
+        usd: parseFloat(prod.usd) || 0,
+        localTaxa: prod.localTaxa || g.localTaxa || "isento",
+        qtdComprada: parseInt(prod.qtdComprada) || 1,
+        descricao: prod.nome,
+        loja: prod.loja || g.loja,
+        dolarPago: prod.dollarPago || g.dolarPago || settings.dollarPago,
+      } : g));
+    }
     notify(prod.id?"Atualizado!":"Adicionado!"); setShowForm(false); setEditProd(null);
   }
 
@@ -2796,7 +2824,8 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
   const brlPago=p.dollarPago?calcBRLPago(usdUnit,settings,p.dollarPago):null;
   const peso=prodPeso(p);
   const qtdCad=prodQtdCad(p);
-  const usdTotalPlanejado=usdComTaxa(p)*qtdCad;
+  const taxaEfetiva=taxaLocal(p)>0?taxaLocal(p):0.065;
+  const usdTotalPlanejado=(parseFloat(p.usd)||0)*(1+taxaEfetiva)*qtdCad;
   const brlTotalPlanejado=usdTotalPlanejado*settings.dollarPago;
   const prioColors={Alta:{color:C.danger,bg:C.dangerLight},Média:{color:C.warning,bg:C.warningLight},Baixa:{color:C.primary,bg:C.primaryLight}};
   const pc=prioColors[p.prioridade]||prioColors["Média"];
@@ -2852,7 +2881,7 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
       </div>}
       {expanded&&(
         <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`}}>
-          {[{label:"BRL previsto (unit.)",value:`${fmtBRL(brl,2)}`},...(qtdCad>1?[{label:"Qtd planejada",value:`${qtdCad}x`,color:C.primary},{label:"USD total planejado",value:fmtUSD(usdTotalPlanejado,2),color:C.primary},{label:"BRL total planejado",value:fmtBRL(brlTotalPlanejado,2),color:C.text}]:[]),...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtdC>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD comprado (×${qtdC})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
+          {[{label:"BRL previsto (unit.)",value:`${fmtBRL(brl,2)}`},...(qtdCad>1?[{label:"Qtd planejada",value:`${qtdCad}x`,color:C.primary},{label:`USD total (${p.localTaxa&&p.localTaxa!=="isento"?p.localTaxa:"base Orlando 6,5%"})`,value:fmtUSD(usdTotalPlanejado,2),color:C.primary},{label:"BRL total planejado",value:fmtBRL(brlTotalPlanejado,2),color:C.text}]:[]),...(brlPago?[{label:"BRL pago",value:`${fmtBRL(brlPago,2)}`,color:C.success},{label:"Diferença",value:`${fmtBRL((brl-brlPago),2)}`,color:brl>brlPago?C.success:C.danger}]:[]),...(qtdC>1?[{label:"USD unitário",value:fmtUSD(p.usd,2),color:C.textMid},{label:`USD comprado (×${qtdC})`,value:fmtUSD(usdTotal,2),color:C.primary}]:[{label:"USD c/ taxa",value:`${fmtUSD(calcUsdFinal(usdTotal,settings),2)}`,color:C.textMid}])].map(({label,value,color})=>(
             <div key={label} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}>
               <span style={{fontSize:13,color:C.textMid}}>{label}</span>
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
