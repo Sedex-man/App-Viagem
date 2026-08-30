@@ -3166,6 +3166,37 @@ function ProdutoForm({prod,onSave,onClose}) {
   const isL=prod?._legais===true;
   const empty={nome:"",loja:"Walmart",usd:"",peso:"",tipoPeso:"g",status:"pendente",prioridade:"Média",link:"",imagem:"",dollarPago:"",quantidade:1,_legais:isL};
   const [f,setF]=useState(prod?.id?{...prod,usd:prod.usd.toString(),peso:(prod.peso||"").toString(),tipoPeso:prod.tipoPeso||"g",dollarPago:(prod.dollarPago||"").toString(),quantidade:prod.quantidade||1,_legais:prod._legais||isL}:empty);
+  const fileGaleriaRef = useRef();
+  const fileCameraRef = useRef();
+  const [uploadingImg, setUploadingImg] = useState(false);
+
+  function handleImagemFile(file) {
+    if (!file) return;
+    setUploadingImg(true);
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        // Redimensiona pra não estourar o limite de 1MB do documento no Firestore
+        const maxDim = 800;
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+          else { width = Math.round(width * maxDim / height); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        setF(p => ({ ...p, imagem: canvas.toDataURL("image/jpeg", 0.75) }));
+        setUploadingImg(false);
+      };
+      img.onerror = () => { setF(p => ({ ...p, imagem: e.target.result })); setUploadingImg(false); };
+      img.src = e.target.result;
+    };
+    reader.onerror = () => setUploadingImg(false);
+    reader.readAsDataURL(file);
+  }
+
   function save(){if(!f.nome||!f.usd)return alert("Preencha nome e USD");onSave({...f,usd:parseFloat(f.usd),peso:parseFloat(f.peso)||0,tipoPeso:f.tipoPeso||"g",dollarPago:f.dollarPago?parseFloat(f.dollarPago):null,quantidade:parseInt(f.quantidade)||1});}
   return (
     <Modal title={prod?.id?"Editar produto":isL?"✨ Item legal":"Novo produto"} onClose={onClose}>
@@ -3215,6 +3246,23 @@ function ProdutoForm({prod,onSave,onClose}) {
       <input style={S.input} type="url" placeholder="https://amazon.com/..." value={f.link} onChange={e=>setF(p=>({...p,link:e.target.value}))}/>
       <label style={S.label}>URL da imagem (opcional)</label>
       <input style={S.input} type="url" placeholder="https://..." value={f.imagem} onChange={e=>setF(p=>({...p,imagem:e.target.value}))}/>
+
+      <label style={S.label}>Ou envie uma foto</label>
+      <input ref={fileGaleriaRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImagemFile(e.target.files[0])}/>
+      <input ref={fileCameraRef} type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={e=>handleImagemFile(e.target.files[0])}/>
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        <button type="button" style={{...S.btnOutline,flex:1,justifyContent:"center"}} onClick={()=>fileGaleriaRef.current.click()}>🖼 Galeria</button>
+        <button type="button" style={{...S.btnOutline,flex:1,justifyContent:"center"}} onClick={()=>fileCameraRef.current.click()}>📷 Tirar foto</button>
+      </div>
+      {uploadingImg&&<div style={{fontSize:12,color:C.textLight,marginBottom:10}}>Processando imagem...</div>}
+      {f.imagem&&!uploadingImg&&(
+        <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+          <div style={{width:56,height:56,borderRadius:10,overflow:"hidden",border:`1px solid ${C.border}`,flexShrink:0}}>
+            <img src={f.imagem} alt="" style={{width:"100%",height:"100%",objectFit:"cover"}}/>
+          </div>
+          <button type="button" style={{...S.btnOutline,color:C.danger,borderColor:C.danger+"44"}} onClick={()=>setF(p=>({...p,imagem:""}))}>Remover imagem</button>
+        </div>
+      )}
       <button style={S.btnPrimary} onClick={save}>{prod?.id?"Salvar":isL?"Adicionar item":"Adicionar produto"}</button>
     </Modal>
   );
@@ -3293,7 +3341,7 @@ const S={
   tag:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,fontSize:11,padding:"2px 7px",borderRadius:999,fontWeight:600},
   sectionLabel:{fontSize:11,fontWeight:700,color:C.textLight,textTransform:"uppercase",letterSpacing:"0.8px",marginBottom:8,marginTop:4},
   btnPrimary:{width:"100%",background:`linear-gradient(135deg,${C.gradientA},${C.gradientB})`,border:"none",color:"white",borderRadius:12,padding:"13px",fontSize:14,fontWeight:700,cursor:"pointer",fontFamily:"'Inter',sans-serif",boxShadow:`0 4px 14px ${C.primary}44`},
-  btnOutline:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,borderRadius:9,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:600,fontFamily:"'Inter',sans-serif"},
+  btnOutline:{background:C.bg,border:`1px solid ${C.border}`,color:C.textMid,borderRadius:9,padding:"7px 12px",fontSize:12,cursor:"pointer",fontWeight:600,fontFamily:"'Inter',sans-serif",display:"flex",alignItems:"center",gap:6},
   modalOverlay:{position:"fixed",inset:0,background:"rgba(15,23,42,0.35)",zIndex:100,display:"flex",alignItems:"flex-end",justifyContent:"center",backdropFilter:"blur(4px)"},
   modal:{background:C.bgCard,borderRadius:"20px 20px 0 0",width:"100%",maxWidth:430,maxHeight:"92vh",boxShadow:"0 -4px 32px rgba(0,0,0,0.12)"},
   modalHeader:{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 18px 14px",borderBottom:`1px solid ${C.border}`},
