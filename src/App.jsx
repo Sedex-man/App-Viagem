@@ -1016,6 +1016,12 @@ DOLLAR TREE:
 }
 
 
+// ─── PALETA PREMIUM (capa inicial) ───────────────────────────────────────────
+const BANK = {
+  ink:"#0A0E1A", navy:"#111A2E", inkLine:"rgba(255,255,255,0.08)",
+  gold:"#C9A24B", goldSoft:"rgba(201,162,75,0.14)", goldLine:"rgba(201,162,75,0.35)",
+};
+
 // ─── COTAÇÃO BCB CARD (Dashboard) ────────────────────────────────────────────
 function CotacaoBcbCard({settings}) {
   const [rate, setRate] = useState(null);
@@ -1040,49 +1046,40 @@ function CotacaoBcbCard({settings}) {
   const varPos = variacao >= 0;
 
   return (
-    <div style={{...S.card,marginBottom:10,background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:`1px solid ${C.success}33`,padding:"12px 14px"}}>
+    <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:"0 1px 3px rgba(15,23,42,0.04)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <div style={{fontSize:11,fontWeight:700,color:C.success,textTransform:"uppercase",letterSpacing:"0.5px",marginBottom:4}}>💱 Dólar hoje (BCB)</div>
-          {loading && <div style={{fontSize:13,color:C.textLight}}>Buscando...</div>}
+          <div style={{fontSize:10,fontWeight:700,color:BANK.gold,textTransform:"uppercase",letterSpacing:"1px",marginBottom:5}}>Dólar hoje · BCB</div>
+          {loading && <div style={{fontSize:13,color:C.textLight}}>Buscando cotação...</div>}
           {!loading && rate && (
             <>
-              <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                <span style={{fontSize:22,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(rate,4)}</span>
+              <div style={{display:"flex",alignItems:"baseline",gap:8}}>
+                <span style={{fontSize:24,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace",letterSpacing:"-0.5px"}}>{fmtBRL(rate,4)}</span>
                 {variacao !== null && (
-                  <span style={{fontSize:12,fontWeight:700,color:varPos?C.danger:C.success}}>
+                  <span style={{fontSize:11,fontWeight:700,color:varPos?C.danger:C.success,background:varPos?C.dangerLight:C.successLight,borderRadius:6,padding:"2px 6px"}}>
                     {varPos?"▲":"▼"} {Math.abs(variacao).toFixed(2)}%
                   </span>
                 )}
               </div>
-              <div style={{fontSize:11,color:C.textLight,marginTop:1}}>mercado às {lastFetch}</div>
+              <div style={{fontSize:11,color:C.textLight,marginTop:2}}>atualizado às {lastFetch}</div>
             </>
           )}
           {!loading && !rate && <div style={{fontSize:12,color:C.textLight}}>Toque para buscar</div>}
         </div>
-        <div style={{textAlign:"right"}}>
-          {comIOF && (
-            <div>
-              <div style={{fontSize:11,color:C.textMid,marginBottom:2}}>c/ IOF + spread</div>
-              <div style={{fontSize:16,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtBRL(comIOF,4)}</div>
-              <div style={{fontSize:10,color:C.textLight}}>{settings.iof}% IOF + {settings.spread}% spread</div>
-            </div>
-          )}
-          <button onClick={buscarCotacao} style={{background:C.successLight,border:`1px solid ${C.success}44`,borderRadius:8,padding:"5px 10px",fontSize:11,fontWeight:700,color:C.success,cursor:"pointer",marginTop:6}}>
-            {loading?"...":"↻ Atualizar"}
-          </button>
-        </div>
+        <button onClick={buscarCotacao} aria-label="Atualizar cotação" style={{background:BANK.goldSoft,border:`1px solid ${BANK.goldLine}`,borderRadius:10,width:34,height:34,fontSize:14,color:BANK.gold,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {loading?"⋯":"↻"}
+        </button>
       </div>
       {rate && (
-        <div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.success}22`,display:"flex",gap:10}}>
+        <div style={{marginTop:12,paddingTop:12,borderTop:`1px solid ${C.borderLight}`,display:"flex"}}>
           {[
-            {label:"Mercado",val:fmtBRL(rate,4),color:C.text},
-            {label:"c/ IOF+spread",val:fmtBRL(comIOF,4),color:C.warning},
-            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,4),color:rate<=settings.dollarPago?C.danger:C.success},
-          ].map(({label,val,color})=>(
-            <div key={label} style={{flex:1,textAlign:"center",background:"rgba(255,255,255,0.6)",borderRadius:8,padding:"6px 4px"}}>
-              <div style={{fontSize:9,color:C.textLight,marginBottom:2,fontWeight:600,textTransform:"uppercase"}}>{label}</div>
-              <div style={{fontSize:12,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{val}</div>
+            {label:"Mercado",val:fmtBRL(rate,4)},
+            {label:"c/ IOF+spread",val:fmtBRL(comIOF,4)},
+            {label:"Seu dólar",val:fmtBRL(settings.dollarPago,4)},
+          ].map(({label,val},i)=>(
+            <div key={label} style={{flex:1,textAlign:i===0?"left":i===2?"right":"center",borderLeft:i>0?`1px solid ${C.borderLight}`:"none",paddingLeft:i>0?10:0}}>
+              <div style={{fontSize:9,color:C.textLight,marginBottom:3,fontWeight:600,textTransform:"uppercase",letterSpacing:"0.4px"}}>{label}</div>
+              <div style={{fontSize:12,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{val}</div>
             </div>
           ))}
         </div>
@@ -1098,14 +1095,23 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
   const usdRestante=settings.totalDolarViagem - stats.valorTotalUSD;
   return (
     <div style={S.page}>
-      {/* Hero */}
-      <div style={S.heroCard}>
-        <div style={{fontSize:12,fontWeight:500,color:"rgba(255,255,255,0.75)",marginBottom:3}}>Total planejado</div>
-        <div style={{fontSize:30,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
-        <div style={{fontSize:13,color:"rgba(255,255,255,0.75)",marginTop:4}}>Dólar pago: {fmtBRL(settings.dollarPago,4)} · Ajustado: {fmtBRL(calcDolarAjustado(settings),4)}</div>
-        <div style={{display:"flex",gap:8,marginTop:14,flexWrap:"wrap"}}>
+      {/* Hero — cartão premium */}
+      <div style={{
+        position:"relative",overflow:"hidden",
+        background:`linear-gradient(155deg, ${BANK.ink} 0%, ${BANK.navy} 55%, #1B2438 100%)`,
+        borderRadius:20,padding:"22px 20px",marginBottom:12,
+        boxShadow:"0 12px 32px rgba(10,14,26,0.35)",
+      }}>
+        <div style={{position:"absolute",top:-60,right:-40,width:180,height:180,borderRadius:"50%",background:"radial-gradient(circle, rgba(201,162,75,0.22), transparent 70%)"}}/>
+        <div style={{width:34,height:24,borderRadius:6,background:`linear-gradient(135deg, ${BANK.gold}, #8C6D2E)`,marginBottom:16,opacity:0.9}}/>
+
+        <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"1.5px",marginBottom:6}}>Total planejado</div>
+        <div style={{fontSize:32,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1,fontFamily:"'DM Mono',monospace"}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+        <div style={{fontSize:12,color:"rgba(255,255,255,0.5)",marginTop:8}}>Dólar pago {fmtBRL(settings.dollarPago,4)} · Ajustado {fmtBRL(calcDolarAjustado(settings),4)}</div>
+
+        <div style={{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"}}>
           {[`IOF ${settings.iof}%`,`Spread ${settings.spread}%`,`Taxa ${settings.taxa}%`].map(t=>(
-            <span key={t} style={{background:"rgba(255,255,255,0.15)",borderRadius:999,padding:"3px 10px",fontSize:11,color:"rgba(255,255,255,0.9)",fontWeight:500}}>{t}</span>
+            <span key={t} style={{border:`1px solid ${BANK.goldLine}`,color:BANK.gold,borderRadius:999,padding:"3px 10px",fontSize:10,fontWeight:700,letterSpacing:"0.3px"}}>{t}</span>
           ))}
         </div>
       </div>
@@ -1115,13 +1121,13 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
 
       {/* Anotações */}
       <div style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
-        <button onClick={()=>setShowNotas(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"12px 14px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <span style={{fontSize:18}}>📝</span>
+        <button onClick={()=>setShowNotas(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <div style={{width:28,height:28,borderRadius:8,background:BANK.goldSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:BANK.gold,fontWeight:800}}>N</div>
             <span style={{fontSize:14,fontWeight:700,color:C.text}}>Anotações</span>
-            {anotacoes&&<span style={{fontSize:11,background:C.primaryLight,color:C.primary,borderRadius:999,padding:"1px 8px",fontWeight:600}}>{anotacoes.split("\n").filter(Boolean).length} linha(s)</span>}
+            {anotacoes&&<span style={{fontSize:10,background:C.borderLight,color:C.textMid,borderRadius:999,padding:"2px 8px",fontWeight:700}}>{anotacoes.split("\n").filter(Boolean).length}</span>}
           </div>
-          <span style={{fontSize:12,color:C.textLight,fontWeight:600}}>{showNotas?"▲ Fechar":"▼ Abrir"}</span>
+          <span style={{fontSize:12,color:C.textLight,fontWeight:600}}>{showNotas?"▲":"▼"}</span>
         </button>
         {showNotas&&(
           <div style={{borderTop:`1px solid ${C.border}`,padding:"12px 14px"}}>
@@ -1137,58 +1143,64 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
       </div>
 
       {/* Dólar levando */}
-      <div style={{...S.card,background:"linear-gradient(135deg,#F0FDF4,#ECFDF5)",border:`1px solid ${C.success}33`}}>
-        <div style={{fontSize:12,fontWeight:600,color:C.success,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💵 Dólares na viagem</div>
+      <div style={{...S.card,padding:"16px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <div style={{width:26,height:26,borderRadius:7,background:C.successLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:C.success}}>$</div>
+          <span style={{fontSize:11,fontWeight:700,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.6px"}}>Dólares na viagem</span>
+        </div>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end"}}>
           <div>
-            <div style={{fontSize:28,fontWeight:800,color:C.success,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(stats.valorTotalUSD,2)}</div>
-            <div style={{fontSize:13,color:C.textMid,marginTop:2}}>planejado para compras</div>
+            <div style={{fontSize:26,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(stats.valorTotalUSD,2)}</div>
+            <div style={{fontSize:12,color:C.textLight,marginTop:2}}>planejado para compras</div>
           </div>
           <div style={{textAlign:"right"}}>
-            <div style={{fontSize:16,fontWeight:700,color:usdRestante>=0?C.textMid:C.danger,fontFamily:"'DM Mono',monospace"}}>
-              {usdRestante>=0?"Sobra":"Falta"} US${fmtN(Math.abs(usdRestante),2)}
+            <div style={{fontSize:14,fontWeight:700,color:usdRestante>=0?C.success:C.danger,fontFamily:"'DM Mono',monospace"}}>
+              {usdRestante>=0?"Sobra ":"Falta "}{fmtUSD(Math.abs(usdRestante),2)}
             </div>
-            <div style={{fontSize:12,color:C.textLight}}>de US$ {settings.totalDolarViagem} total</div>
+            <div style={{fontSize:11,color:C.textLight}}>de {fmtUSD(settings.totalDolarViagem,0)} total</div>
           </div>
         </div>
-        <div style={{height:6,background:"#D1FAE5",borderRadius:999,overflow:"hidden",marginTop:12}}>
+        <div style={{height:5,background:C.borderLight,borderRadius:999,overflow:"hidden",marginTop:12}}>
           <div style={{width:`${Math.min(100,(stats.valorTotalUSD/settings.totalDolarViagem)*100)}%`,height:"100%",background:C.success,borderRadius:999}}/>
         </div>
       </div>
 
       {/* 4 mini cards */}
       <div style={S.grid4}>
-        {[{label:"Produtos",value:stats.total,color:C.primary},{label:"Comprados",value:stats.comprados,color:C.success},{label:"Pendentes",value:stats.pendentes,color:C.warning},{label:"Lojas",value:stats.lojas,color:C.purple}].map(({label,value,color})=>(
-          <div key={label} style={{...S.card,padding:"12px 8px",textAlign:"center",flex:1,marginBottom:0}}>
+        {[{label:"Produtos",value:stats.total,color:C.text},{label:"Comprados",value:stats.comprados,color:C.success},{label:"Pendentes",value:stats.pendentes,color:C.warning},{label:"Lojas",value:stats.lojas,color:C.text}].map(({label,value,color})=>(
+          <div key={label} style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:14,padding:"14px 6px",textAlign:"center",flex:1}}>
             <div style={{fontSize:20,fontWeight:800,color,fontFamily:"'DM Mono',monospace"}}>{value}</div>
-            <div style={{fontSize:10,color:C.textLight,marginTop:2,fontWeight:500}}>{label}</div>
+            <div style={{fontSize:9,color:C.textLight,marginTop:3,fontWeight:700,textTransform:"uppercase",letterSpacing:"0.4px"}}>{label}</div>
           </div>
         ))}
       </div>
 
       {/* Meus gastos reais */}
-      <div style={{...S.card,background:"linear-gradient(135deg,#FFF7ED,#FFFBEB)",border:`1px solid ${C.warning}33`}}>
-        <div style={{fontSize:12,fontWeight:600,color:C.warning,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💸 Meus gastos reais</div>
-        <div style={{fontSize:26,fontWeight:800,color:C.warning,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(stats.totalMeusGastosUSD,2)}</div>
-        <div style={{fontSize:13,color:C.textMid,marginTop:2}}>≈ R$ {(stats.totalMeusGastosUSD*settings.dollarPago).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})} · apenas minha parte</div>
+      <div style={{...S.card,padding:"16px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <div style={{width:26,height:26,borderRadius:7,background:C.warningLight,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:800,color:C.warning}}>$</div>
+          <span style={{fontSize:11,fontWeight:700,color:C.textMid,textTransform:"uppercase",letterSpacing:"0.6px"}}>Meus gastos reais</span>
+        </div>
+        <div style={{fontSize:24,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{fmtUSD(stats.totalMeusGastosUSD,2)}</div>
+        <div style={{fontSize:12,color:C.textLight,marginTop:3}}>≈ {fmtBRL(stats.totalMeusGastosUSD*settings.dollarPago,2)} · apenas minha parte</div>
       </div>
 
       {/* Progresso + peso */}
-      <div style={{...S.card,display:"flex",alignItems:"center",gap:20,cursor:"pointer"}} onClick={()=>{onTabChange&&onTabChange(9);}}>
-        <div style={{position:"relative",width:70,height:70,flexShrink:0}}>
-          <svg width="70" height="70" viewBox="0 0 70 70">
+      <div style={{...S.card,display:"flex",alignItems:"center",gap:18,cursor:"pointer",padding:"16px"}} onClick={()=>{onTabChange&&onTabChange(9);}}>
+        <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
+          <svg width="64" height="64" viewBox="0 0 70 70">
             <circle cx="35" cy="35" r="27" fill="none" stroke={C.borderLight} strokeWidth="7"/>
-            <circle cx="35" cy="35" r="27" fill="none" stroke={C.primary} strokeWidth="7" strokeDasharray={`${2*Math.PI*27}`} strokeDashoffset={`${2*Math.PI*27*(1-pct/100)}`} strokeLinecap="round" transform="rotate(-90 35 35)" style={{transition:"stroke-dashoffset 0.6s ease"}}/>
+            <circle cx="35" cy="35" r="27" fill="none" stroke={BANK.gold} strokeWidth="7" strokeDasharray={`${2*Math.PI*27}`} strokeDashoffset={`${2*Math.PI*27*(1-pct/100)}`} strokeLinecap="round" transform="rotate(-90 35 35)" style={{transition:"stroke-dashoffset 0.6s ease"}}/>
           </svg>
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
-            <div style={{fontSize:14,fontWeight:800,color:C.primary,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
+            <div style={{fontSize:13,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
           </div>
         </div>
         <div style={{flex:1}}>
           <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:3}}>Progresso de compras</div>
           <div style={{fontSize:12,color:C.textMid,marginBottom:8}}>{stats.comprados}/{stats.total} itens comprados</div>
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
-            <span style={{fontSize:11,color:C.textLight}}>⚖ Peso: {(stats.pesoTotal/1000).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}kg / {(settings.pesoMax/1000).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}kg</span>
+            <span style={{fontSize:11,color:C.textLight}}>Peso {(stats.pesoTotal/1000).toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}kg / {(settings.pesoMax/1000).toLocaleString("pt-BR",{minimumFractionDigits:1,maximumFractionDigits:1})}kg</span>
             <span style={{fontSize:11,color:pesoColor,fontWeight:700}}>{fmtN(pesoPercent,0)}%</span>
           </div>
           <div style={{height:5,background:C.borderLight,borderRadius:999,overflow:"hidden"}}>
@@ -1200,11 +1212,11 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
 
       {/* Financeiro */}
       <div style={S.card}>
-        <div style={{fontWeight:700,fontSize:14,color:C.text,marginBottom:12}}>💰 Resumo financeiro</div>
-        {[{label:"USD total planejado",value:`${fmtUSD(stats.valorTotalUSD,2)}`,color:C.primary},{label:"BRL previsto (c/ taxas)",value:`${fmtBRL(stats.valorTotalBRL,2)}`,color:C.text},{label:"BRL já gasto",value:`${fmtBRL(stats.valorGasto,2)}`,color:C.success},{label:"Meus gastos (USD)",value:`${fmtUSD(stats.totalMeusGastosUSD,2)}`,color:C.warning}].map(({label,value,color})=>(
-          <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:`1px solid ${C.borderLight}`}}>
+        <div style={{fontWeight:700,fontSize:12,color:C.textMid,marginBottom:12,textTransform:"uppercase",letterSpacing:"0.6px"}}>Resumo financeiro</div>
+        {[{label:"USD total planejado",value:`${fmtUSD(stats.valorTotalUSD,2)}`},{label:"BRL previsto (c/ taxas)",value:`${fmtBRL(stats.valorTotalBRL,2)}`},{label:"BRL já gasto",value:`${fmtBRL(stats.valorGasto,2)}`,color:C.success},{label:"Meus gastos (USD)",value:`${fmtUSD(stats.totalMeusGastosUSD,2)}`}].map(({label,value,color})=>(
+          <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"10px 0",borderBottom:`1px solid ${C.borderLight}`}}>
             <span style={{fontSize:13,color:C.textMid}}>{label}</span>
-            <span style={{fontSize:14,fontWeight:700,color,fontFamily:"'DM Mono',monospace"}}>{value}</span>
+            <span style={{fontSize:14,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
           </div>
         ))}
       </div>
@@ -1758,9 +1770,10 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
   function changeSubTab(v){setSubTab(v);onSubTabChange&&onSubTabChange(v);}
   const SUBTABS = [
     {id:"conversor",label:"💱 Câmbio"},
-
-
-
+    {id:"simulador",label:"📊 Simulador"},
+    {id:"dolar",label:"💵 Histórico Dólar"},
+    {id:"checklist",label:"✅ Checklist"},
+    {id:"bagagem",label:"🧳 Bagagem"},
   ];
   return (
     <div style={S.page}>
@@ -1770,7 +1783,10 @@ function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setCompras
         ))}
       </div>
       {subTab==="conversor"&&<ConversorTab settings={settings}/>}
-
+      {subTab==="simulador"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]} produtos={produtos||[]}/>}
+      {subTab==="dolar"&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
+      {subTab==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
+      {subTab==="bagagem"&&<BagagemTab produtos={produtos} settings={settings}/>}
     </div>
   );
 }
@@ -2654,22 +2670,22 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
 // ─── GALERIA TAB ──────────────────────────────────────────────────────────────
 function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal,onUpdate,onUpdateLegal}) {
   const [subTab,setSubTab]=useState("compras");
-  const [selected,setSelected]=useState(null);
+  const [selectedIdx,setSelectedIdx]=useState(null);
   const lista=subTab==="legais"?itensLegais:produtos;
   const isLegais=subTab==="legais";
+  const selected = selectedIdx!=null ? lista[selectedIdx] : null;
+  // Se a lista mudar (item removido/movido) e o índice ficar fora do range, fecha o modal
+  useEffect(()=>{ if(selectedIdx!=null && selectedIdx>=lista.length) setSelectedIdx(null); },[lista.length, selectedIdx]);
   return (
     <div style={S.page}>
       <div style={{display:"flex",gap:4,background:C.borderLight,borderRadius:12,padding:4,marginBottom:12}}>
         {[["compras","🛒 Compras"],["legais","✨ Legais"]].map(([v,l])=>(
-          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>setSubTab(v)}>{l}</button>
+          <button key={v} style={{flex:1,padding:"9px 8px",borderRadius:9,border:"none",cursor:"pointer",fontSize:13,fontWeight:600,background:subTab===v?C.bgCard:"transparent",color:subTab===v?C.primary:C.textMid,boxShadow:subTab===v?"0 1px 4px rgba(0,0,0,0.08)":"none"}} onClick={()=>{setSubTab(v);setSelectedIdx(null);}}>{l}</button>
         ))}
       </div>
-      <div style={{...S.card,background:"#F0F9FF",border:"1px solid #BAE6FD",padding:"10px 14px",marginBottom:12}}>
-        <div style={{fontSize:12,color:"#0369A1"}}>🔍 Imagens buscadas via og:image do link ou DuckDuckGo. Adicione o link do produto para melhor resultado.</div>
-      </div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-        {lista.map(p=>(
-          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>setSelected(p)} className="galeria-card">
+        {lista.map((p,i)=>(
+          <div key={p.id} style={{...S.card,padding:0,overflow:"hidden",cursor:"pointer"}} onClick={()=>setSelectedIdx(i)} className="galeria-card">
             <div style={{height:120,position:"relative",overflow:"hidden"}}>
               <ProductImage produto={p} iconSize={40}/>
               {p.status==="comprado"&&<div style={{position:"absolute",top:8,right:8,background:C.success,borderRadius:999,padding:"2px 8px",fontSize:10,color:"white",fontWeight:700}}>✓ Comprado</div>}
@@ -2686,20 +2702,50 @@ function GaleriaTab({produtos,itensLegais,settings,onEdit,onToggle,onToggleLegal
       {lista.length===0&&<Empty text="Nenhum item ainda"/>}
       {selected&&<GaleriaDetailModal
         p={selected}
+        index={selectedIdx}
+        total={lista.length}
+        onPrev={()=>setSelectedIdx(i=>Math.max(0,i-1))}
+        onNext={()=>setSelectedIdx(i=>Math.min(lista.length-1,i+1))}
         settings={settings}
         isLegais={isLegais}
-        onClose={()=>setSelected(null)}
-        onToggle={()=>{ (isLegais?onToggleLegal:onToggle)(selected.id); setSelected(s=>s?{...s,status:s.status==="comprado"?"pendente":"comprado",qtdComprada:s.status==="comprado"?0:(parseInt(s.qtdComprada)||1)}:s); }}
-        onUpdate={(id,campos)=>{ (isLegais?onUpdateLegal:onUpdate)(id,campos); setSelected(s=>s?{...s,...campos}:s); }}
-        onEditFull={()=>{ onEdit({...selected,_legais:isLegais}); setSelected(null); }}
+        onClose={()=>setSelectedIdx(null)}
+        onToggle={()=>(isLegais?onToggleLegal:onToggle)(selected.id)}
+        onUpdate={(id,campos)=>(isLegais?onUpdateLegal:onUpdate)(id,campos)}
+        onEditFull={()=>{ onEdit({...selected,_legais:isLegais}); setSelectedIdx(null); }}
       />}
     </div>
   );
 }
 
-function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEditFull}) {
+function GaleriaDetailModal({p,index,total,onPrev,onNext,settings,isLegais,onClose,onToggle,onUpdate,onEditFull}) {
   const [link,setLink]=useState(p.link||"");
   const [fullscreen,setFullscreen]=useState(false);
+  const touchX = useRef(null);
+  const hasPrev = index>0, hasNext = index<total-1;
+
+  // Sincroniza os campos locais sempre que o produto exibido muda (troca de foto/swipe)
+  useEffect(()=>{ setLink(p.link||""); setFullscreen(false); }, [p.id]);
+
+  useEffect(()=>{
+    function onKey(e){
+      if(e.key==="ArrowLeft"&&hasPrev) onPrev();
+      if(e.key==="ArrowRight"&&hasNext) onNext();
+    }
+    window.addEventListener("keydown",onKey);
+    return ()=>window.removeEventListener("keydown",onKey);
+  },[hasPrev,hasNext,onPrev,onNext]);
+
+  function handleTouchStart(e){ touchX.current = e.touches[0].clientX; }
+  function handleTouchEnd(e){
+    if(touchX.current==null) return;
+    const dx = e.changedTouches[0].clientX - touchX.current;
+    if(Math.abs(dx)>45){
+      if(dx<0&&hasNext) onNext();
+      else if(dx>0&&hasPrev) onPrev();
+    }
+    touchX.current=null;
+  }
+
   const isComprado=p.status==="comprado";
   const qtdC=isComprado?(parseInt(p.qtdComprada)||1):0;
   const usdUnit=parseFloat(p.usd)||0;
@@ -2707,12 +2753,26 @@ function GaleriaDetailModal({p,settings,isLegais,onClose,onToggle,onUpdate,onEdi
   const brl=usdUnit*calcDolarAjustado(settings);
   return (
     <Modal title={p.nome} onClose={onClose}>
-      <div style={{borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220,cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
-        <ProductImage produto={p} iconSize={48}/>
+      {total>1&&<div style={{fontSize:11,fontWeight:700,color:C.textLight,marginBottom:8}}>{index+1} de {total}</div>}
+      <div
+        style={{position:"relative",borderRadius:14,overflow:"hidden",border:`1px solid ${C.border}`,marginBottom:14,height:220}}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
+        <div style={{width:"100%",height:"100%",cursor:"zoom-in"}} onClick={()=>setFullscreen(true)}>
+          <ProductImage produto={p} iconSize={48}/>
+        </div>
+        {hasPrev&&<button onClick={onPrev} aria-label="Produto anterior" style={{position:"absolute",left:8,top:"50%",transform:"translateY(-50%)",width:32,height:32,borderRadius:"50%",border:"none",background:"rgba(15,23,42,0.45)",color:"#fff",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>}
+        {hasNext&&<button onClick={onNext} aria-label="Próximo produto" style={{position:"absolute",right:8,top:"50%",transform:"translateY(-50%)",width:32,height:32,borderRadius:"50%",border:"none",background:"rgba(15,23,42,0.45)",color:"#fff",fontSize:16,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>}
       </div>
 
       {fullscreen&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}} onClick={()=>setFullscreen(false)}>
+        <div
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.9)",zIndex:200,display:"flex",alignItems:"center",justifyContent:"center"}}
+          onClick={()=>setFullscreen(false)}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           <button style={{position:"absolute",top:16,right:16,background:"rgba(255,255,255,0.15)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",fontSize:16,cursor:"pointer"}} onClick={()=>setFullscreen(false)}>✕</button>
           <div style={{width:"92vw",height:"80vh",maxWidth:600}}>
             <ProductImage produto={p} iconSize={64} style={{background:"transparent"}} fit="contain"/>
