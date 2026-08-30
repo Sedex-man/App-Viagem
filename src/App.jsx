@@ -58,8 +58,8 @@ async function saveCloudState(userDocRef, state, { force=false } = {}) {
 
 // ─── COLORS ──────────────────────────────────────────────────────────────────
 const C = {
-  bg:"#F8FAFC",bgCard:"#FFFFFF",border:"#E5E7EB",borderLight:"#F1F5F9",
-  primary:"#2563EB",primaryLight:"#EFF6FF",gradientA:"#2563EB",gradientB:"#06B6D4",
+  bg:"#F7F8FA",bgCard:"#FFFFFF",border:"#E3E7ED",borderLight:"#EEF1F5",
+  primary:"#123772",primaryLight:"#EAEFF7",gradientA:"#0A1830",gradientB:"#1E4FD6",
   success:"#10B981",successLight:"#ECFDF5",warning:"#F59E0B",warningLight:"#FFFBEB",
   danger:"#EF4444",dangerLight:"#FEF2F2",purple:"#8B5CF6",purpleLight:"#F5F3FF",
   text:"#0F172A",textMid:"#475569",textLight:"#94A3B8",textXLight:"#CBD5E1",
@@ -1016,10 +1016,10 @@ DOLLAR TREE:
 }
 
 
-// ─── PALETA PREMIUM (capa inicial) ───────────────────────────────────────────
+// ─── PALETA PREMIUM (capa inicial) — inspirada na identidade BTG ─────────────
 const BANK = {
-  ink:"#0A0E1A", navy:"#111A2E", inkLine:"rgba(255,255,255,0.08)",
-  gold:"#C9A24B", goldSoft:"rgba(201,162,75,0.14)", goldLine:"rgba(201,162,75,0.35)",
+  ink:"#0A1830", navy:"#12294D", inkLine:"rgba(255,255,255,0.08)",
+  accent:"#5B8DF7", accentSoft:"rgba(91,141,247,0.14)", accentLine:"rgba(91,141,247,0.35)",
 };
 
 // ─── COTAÇÃO BCB CARD (Dashboard) ────────────────────────────────────────────
@@ -1049,7 +1049,7 @@ function CotacaoBcbCard({settings}) {
     <div style={{background:C.bgCard,border:`1px solid ${C.border}`,borderRadius:16,padding:"14px 16px",marginBottom:10,boxShadow:"0 1px 3px rgba(15,23,42,0.04)"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
         <div>
-          <div style={{fontSize:10,fontWeight:700,color:BANK.gold,textTransform:"uppercase",letterSpacing:"1px",marginBottom:5}}>Dólar hoje · BCB</div>
+          <div style={{fontSize:10,fontWeight:700,color:BANK.accent,textTransform:"uppercase",letterSpacing:"1px",marginBottom:5}}>Dólar hoje · BCB</div>
           {loading && <div style={{fontSize:13,color:C.textLight}}>Buscando cotação...</div>}
           {!loading && rate && (
             <>
@@ -1066,7 +1066,7 @@ function CotacaoBcbCard({settings}) {
           )}
           {!loading && !rate && <div style={{fontSize:12,color:C.textLight}}>Toque para buscar</div>}
         </div>
-        <button onClick={buscarCotacao} aria-label="Atualizar cotação" style={{background:BANK.goldSoft,border:`1px solid ${BANK.goldLine}`,borderRadius:10,width:34,height:34,fontSize:14,color:BANK.gold,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+        <button onClick={buscarCotacao} aria-label="Atualizar cotação" style={{background:BANK.accentSoft,border:`1px solid ${BANK.accentLine}`,borderRadius:10,width:34,height:34,fontSize:14,color:BANK.accent,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
           {loading?"⋯":"↻"}
         </button>
       </div>
@@ -1103,7 +1103,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
         boxShadow:"0 12px 32px rgba(10,14,26,0.35)",
       }}>
         <div style={{position:"absolute",top:-60,right:-40,width:180,height:180,borderRadius:"50%",background:"radial-gradient(circle, rgba(201,162,75,0.22), transparent 70%)"}}/>
-        <div style={{width:34,height:24,borderRadius:6,background:`linear-gradient(135deg, ${BANK.gold}, #8C6D2E)`,marginBottom:16,opacity:0.9}}/>
+        <div style={{width:34,height:24,borderRadius:6,background:`linear-gradient(135deg, ${BANK.accent}, #0F2A5C)`,marginBottom:16,opacity:0.9}}/>
 
         <div style={{fontSize:10,fontWeight:700,color:"rgba(255,255,255,0.55)",textTransform:"uppercase",letterSpacing:"1.5px",marginBottom:6}}>Total planejado</div>
         <div style={{fontSize:32,fontWeight:800,color:"#fff",letterSpacing:"-1px",lineHeight:1,fontFamily:"'DM Mono',monospace"}}>R$ {stats.valorTotalBRL.toLocaleString("pt-BR",{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
@@ -1111,7 +1111,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
 
         <div style={{display:"flex",gap:8,marginTop:16,flexWrap:"wrap"}}>
           {[`IOF ${settings.iof}%`,`Spread ${settings.spread}%`,`Taxa ${settings.taxa}%`].map(t=>(
-            <span key={t} style={{border:`1px solid ${BANK.goldLine}`,color:BANK.gold,borderRadius:999,padding:"3px 10px",fontSize:10,fontWeight:700,letterSpacing:"0.3px"}}>{t}</span>
+            <span key={t} style={{border:`1px solid ${BANK.accentLine}`,color:BANK.accent,borderRadius:999,padding:"3px 10px",fontSize:10,fontWeight:700,letterSpacing:"0.3px"}}>{t}</span>
           ))}
         </div>
       </div>
@@ -1123,7 +1123,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
       <div style={{...S.card,padding:0,overflow:"hidden",marginBottom:10}}>
         <button onClick={()=>setShowNotas(v=>!v)} style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:"14px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <div style={{width:28,height:28,borderRadius:8,background:BANK.goldSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:BANK.gold,fontWeight:800}}>N</div>
+            <div style={{width:28,height:28,borderRadius:8,background:BANK.accentSoft,display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:BANK.accent,fontWeight:800}}>N</div>
             <span style={{fontSize:14,fontWeight:700,color:C.text}}>Anotações</span>
             {anotacoes&&<span style={{fontSize:10,background:C.borderLight,color:C.textMid,borderRadius:999,padding:"2px 8px",fontWeight:700}}>{anotacoes.split("\n").filter(Boolean).length}</span>}
           </div>
@@ -1190,7 +1190,7 @@ function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,a
         <div style={{position:"relative",width:64,height:64,flexShrink:0}}>
           <svg width="64" height="64" viewBox="0 0 70 70">
             <circle cx="35" cy="35" r="27" fill="none" stroke={C.borderLight} strokeWidth="7"/>
-            <circle cx="35" cy="35" r="27" fill="none" stroke={BANK.gold} strokeWidth="7" strokeDasharray={`${2*Math.PI*27}`} strokeDashoffset={`${2*Math.PI*27*(1-pct/100)}`} strokeLinecap="round" transform="rotate(-90 35 35)" style={{transition:"stroke-dashoffset 0.6s ease"}}/>
+            <circle cx="35" cy="35" r="27" fill="none" stroke={BANK.accent} strokeWidth="7" strokeDasharray={`${2*Math.PI*27}`} strokeDashoffset={`${2*Math.PI*27*(1-pct/100)}`} strokeLinecap="round" transform="rotate(-90 35 35)" style={{transition:"stroke-dashoffset 0.6s ease"}}/>
           </svg>
           <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
             <div style={{fontSize:13,fontWeight:800,color:C.text,fontFamily:"'DM Mono',monospace"}}>{pct}%</div>
@@ -1764,36 +1764,18 @@ function EventoForm({evento,onSalvar,onClose}) {
   );
 }
 
-// ─── CALC TAB (extendida: Simulador + Histórico Dólar + Checklist + Bagagem) ──
-function CalcTab({settings, gastos, produtos, parcelas, comprasDolar, setComprasDolar, checklist, setChecklist, initialSubTab, onSubTabChange}) {
-  const [subTab, setSubTab] = useState(initialSubTab||"conversor");
-  function changeSubTab(v){setSubTab(v);onSubTabChange&&onSubTabChange(v);}
-  const SUBTABS = [
-    {id:"conversor",label:"💱 Câmbio"},
-    {id:"simulador",label:"📊 Simulador"},
-    {id:"dolar",label:"💵 Histórico Dólar"},
-    {id:"checklist",label:"✅ Checklist"},
-    {id:"bagagem",label:"🧳 Bagagem"},
-  ];
+// ─── CALC TAB ─────────────────────────────────────────────────────────────────
+function CalcTab({settings}) {
   return (
     <div style={S.page}>
-      <div style={{display:"flex",gap:4,overflowX:"auto",paddingBottom:4,marginBottom:14}}>
-        {SUBTABS.map(t=>(
-          <button key={t.id} onClick={()=>changeSubTab(t.id)} style={{...S.chip,...(subTab===t.id?S.chipActive:{}),whiteSpace:"nowrap",flexShrink:0,fontSize:12,padding:"6px 12px"}}>{t.label}</button>
-        ))}
-      </div>
-      {subTab==="conversor"&&<ConversorTab settings={settings}/>}
-      {subTab==="simulador"&&<SimuladorTab settings={settings} gastos={gastos} parcelas={parcelas||[]} produtos={produtos||[]}/>}
-      {subTab==="dolar"&&<HistoricoDolarTab comprasDolar={comprasDolar} setComprasDolar={setComprasDolar} settings={settings}/>}
-      {subTab==="checklist"&&<ChecklistTab checklist={checklist} setChecklist={setChecklist}/>}
-      {subTab==="bagagem"&&<BagagemTab produtos={produtos} settings={settings}/>}
+      <ConversorTab settings={settings}/>
     </div>
   );
 }
 
 // ─── CONVERSOR (era CalcTab original) ────────────────────────────────────────
 function ConversorTab({settings}) {
-  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState("");
+  const [usdN,setUsdN]=useState(""); const [brlN,setBrlN]=useState(""); const [dc,setDc]=useState(""); const [lbs,setLbs]=useState(""); const [oz,setOz]=useState(""); const [flOz,setFlOz]=useState(""); const [ml,setMl]=useState("");
   const dolarAj=calcDolarAjustado(settings); const brlP=parseFloat(usdN)*(1+settings.taxa/100)*dolarAj; const brlC=dc&&parseFloat(usdN)>0?parseFloat(usdN)*(1+settings.taxa/100)*parseFloat(dc):null;
   return (
     <>
@@ -1819,6 +1801,20 @@ function ConversorTab({settings}) {
         <label style={S.label}>Onças (oz)</label>
         <input style={S.input} type="number" placeholder="Ex: 3.4" value={oz} onChange={e=>setOz(e.target.value)}/>
         {oz&&[["Gramas",`${fmtN(parseFloat(oz)*28.3495,1)}g`],["Kg",`${fmtN(parseFloat(oz)*28.3495/1000,3)}kg`],["Libras",`${fmtN(parseFloat(oz)/16,3)} lbs`]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+      </div>
+      <div style={S.sectionLabel}>💧 Conversor de Líquidos</div>
+      <div style={S.card}>
+        <label style={S.label}>Onças líquidas (fl oz)</label>
+        <input style={S.input} type="number" placeholder="Ex: 12" value={flOz} onChange={e=>setFlOz(e.target.value)}/>
+        {flOz&&[["Mililitros",`${fmtN(parseFloat(flOz)*29.5735,1)} ml`],["Litros",`${fmtN(parseFloat(flOz)*29.5735/1000,3)} L`]].map(([l,v])=>(
+          <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
+        ))}
+        <div style={{height:12}}/>
+        <label style={S.label}>Mililitros (ml)</label>
+        <input style={S.input} type="number" placeholder="Ex: 500" value={ml} onChange={e=>setMl(e.target.value)}/>
+        {ml&&[["Onças líquidas",`${fmtN(parseFloat(ml)/29.5735,2)} fl oz`],["Litros",`${fmtN(parseFloat(ml)/1000,3)} L`]].map(([l,v])=>(
           <div key={l} style={{display:"flex",justifyContent:"space-between",padding:"6px 0",borderBottom:`1px solid ${C.borderLight}`}}><span style={{fontSize:13,color:C.textMid}}>{l}</span><span style={{fontSize:13,fontWeight:700,color:C.text,fontFamily:"'DM Mono',monospace"}}>{v}</span></div>
         ))}
       </div>
@@ -3409,6 +3405,6 @@ const CSS=`
   @keyframes slideDown{from{opacity:0;transform:translateX(-50%) translateY(-8px);}to{opacity:1;transform:translateX(-50%) translateY(0);}}
   .galeria-card:active{transform:scale(0.98);}
   @media (max-width: 420px){ .sync-label{display:none;} }
-  .spinner{width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:#2563EB;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
+  .spinner{width:24px;height:24px;border:3px solid #E5E7EB;border-top-color:#123772;border-radius:50%;animation:spin 0.7s linear infinite;display:inline-block;}
   @keyframes spin{to{transform:rotate(360deg);}}
 `;
