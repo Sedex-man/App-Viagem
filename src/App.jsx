@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { getProductImage, imageCache } from './imageService';
 import { db } from "./firebase";
@@ -48,7 +48,7 @@ async function saveCloudState(userDocRef, state, { force=false } = {}) {
       return;
     }
     await setDoc(userDocRef, {
-      ...state,
+      ...sanitize(state),
       updatedAt: serverTimestamp(),
     }, { merge: true });
   } catch (error) {
@@ -518,7 +518,7 @@ DOLLAR TREE:
           gastos: [],
           parcelas: [],
           planejamento: { dataInicio:"", dataFim:"", eventos:[] },
-          checklist: [],
+          checklist: buildChecklistDefaults(),
           comprasDolar: [],
         }, { force: true });
         setSettings(INITIAL_SETTINGS);
@@ -527,7 +527,7 @@ DOLLAR TREE:
         setGastos([]);
         setParcelas([]);
         setPlanejamento({ dataInicio:"", dataFim:"", eventos:[] });
-        setChecklist([]);
+        setChecklist(buildChecklistDefaults());
         setComprasDolar([]);
         setCloudReady(true);
         return;
@@ -672,7 +672,8 @@ DOLLAR TREE:
 
   function deleteProd(id,list="produtos") {
     if(list==="legais") setItensLegais(ps=>ps.filter(p=>p.id!==id));
-    else { setProdutos(ps=>ps.filter(p=>p.id!==id)); setGastos(gs=>gs.filter(g=>g.produtoId!==id)); }
+    else setProdutos(ps=>ps.filter(p=>p.id!==id));
+    setGastos(gs=>gs.filter(g=>g.produtoId!==id));
     notify("Removido","error");
   }
 
@@ -788,7 +789,7 @@ DOLLAR TREE:
         "Quantidade Planejada": p.quantidade || 1,
         "Categoria": p.categoria || "",
         "Prioridade": p.prioridade || "",
-        "Peso Gramas": p.pesoGramas || 0,
+        "Peso Gramas": prodPeso(p) || 0,
         "Status": p.status || "pendente",
         "Local Taxa": p.localTaxa || "isento",
         "Qtd Comprada": p.qtdComprada || 0,
@@ -805,7 +806,7 @@ DOLLAR TREE:
         "Loja": p.loja || "",
         "Preço USD": p.usd || 0,
         "Quantidade Planejada": p.quantidade || 1,
-        "Peso Gramas": p.pesoGramas || 0,
+        "Peso Gramas": prodPeso(p) || 0,
         "Status": p.status || "pendente",
         "Local Taxa": p.localTaxa || "isento",
         "Qtd Comprada": p.qtdComprada || 0,
@@ -1093,7 +1094,6 @@ function CotacaoBcbCard({settings}) {
 // ─── DASHBOARD ────────────────────────────────────────────────────────────────
 function DashboardTab({stats,settings,pesoPercent,pesoColor,pesoBg,onTabChange,anotacoes,setAnotacoes}) {
   const [showNotas,setShowNotas]=useState(false);
-  const dolarAj=calcDolarAjustado(settings);
   const pct=stats.total?Math.round(stats.comprados/stats.total*100):0;
   const usdRestante=settings.totalDolarViagem - stats.valorTotalUSD;
   return (
@@ -1369,7 +1369,6 @@ function GastoCard({g,settings,onEdit,onDelete,onTogglePago,produtos}) {
 
 // ─── GASTO FORM ───────────────────────────────────────────────────────────────
 function GastoForm({gasto,settings,onSave,onClose}) {
-  const cotacaoUsada = gasto?.dolarPago || settings.dollarPago;
   const empty={descricao:"",loja:"",usd:"",dolarPago:settings.dollarPago,categoria:"🍔 Alimentação",divisao:[],data:new Date().toLocaleDateString("pt-BR")};
   const [f,setF]=useState(gasto?{...gasto,usd:(gasto.usd||"").toString(),dolarPago:gasto.dolarPago||settings.dollarPago}:empty);
   const [novaPessoa,setNovaPessoa]=useState("");
@@ -2051,20 +2050,15 @@ const CHECKLIST_DEFAULTS = [
   {cat:"📱 Tecnologia",items:["Adaptador de tomada","Carregadores","Power bank","Câmera/memória","Chip internacional / eSIM"]},
   {cat:"🧳 Mala",items:["Roupas para o clima","Calçado confortável","Necessaire","Cadeado para mala"]},
 ];
+// Gera a lista padrão do checklist (usada só na criação da conta, não a cada montagem da aba)
+function buildChecklistDefaults() {
+  return CHECKLIST_DEFAULTS.flatMap(g=>g.items.map(item=>({id:Date.now()+Math.random(),texto:item,cat:g.cat,feito:false})));
+}
 
 function ChecklistTab({checklist, setChecklist}) {
-  const [initialized, setInitialized] = useState(false);
   const [novoTexto, setNovoTexto] = useState("");
   const [novaCat, setNovaCat] = useState("");
   const [showAdd, setShowAdd] = useState(false);
-
-  useEffect(()=>{
-    if(checklist.length===0 && !initialized) {
-      const defaults = CHECKLIST_DEFAULTS.flatMap(g=>g.items.map(item=>({id:Date.now()+Math.random(),texto:item,cat:g.cat,feito:false})));
-      setChecklist(defaults);
-      setInitialized(true);
-    }
-  },[]);
 
   function toggle(id) { setChecklist(ps=>ps.map(p=>p.id===id?{...p,feito:!p.feito}:p)); }
   function remover(id) { setChecklist(ps=>ps.filter(p=>p.id!==id)); }
@@ -2622,16 +2616,6 @@ function ProdutoCard({p,settings,onToggle,onDelete,onEdit,onMoveToList,onMoveToL
               <span style={{fontSize:13,fontWeight:700,color:color||C.text,fontFamily:"'DM Mono',monospace"}}>{value}</span>
             </div>
           ))}
-          {(p.quantidade||1)>1&&p.status==="comprado"&&(
-            <div style={{marginTop:8,marginBottom:4}}>
-              <div style={{fontSize:12,fontWeight:700,color:C.textMid,marginBottom:6}}>Quantos foram comprados?</div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.max(0,(p.qtdComprada||p.quantidade)-1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>−</button>
-                <span style={{fontSize:16,fontWeight:700,color:C.primary,minWidth:60,textAlign:"center",fontFamily:"'DM Mono',monospace"}}>{p.qtdComprada||p.quantidade}/{p.quantidade}</span>
-                <button onClick={e=>{e.stopPropagation();onEdit({...p,qtdComprada:Math.min(p.quantidade,(p.qtdComprada||p.quantidade)+1)});}} style={{width:32,height:32,borderRadius:8,border:`1px solid ${C.border}`,background:C.bg,fontSize:16,cursor:"pointer"}}>＋</button>
-              </div>
-            </div>
-          )}
           {/* Seletor de taxa local */}
           {!isLegais&&<div style={{marginTop:10,padding:"10px 12px",background:C.bg,borderRadius:10,border:`1px solid ${C.border}`}}>
             <div style={{fontSize:11,fontWeight:700,color:C.textLight,marginBottom:8,textTransform:"uppercase",letterSpacing:"0.5px"}}>💰 Taxa local</div>
